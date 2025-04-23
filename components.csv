@@ -1,0 +1,7 @@
+ComponentName,ComponentType,CostPerUnit,WeightKG
+30x40x12.5,Box,16,0.4
+Clamshell 250G V50,Clamshell,1.25,0.02
+Clamshell 500G V72,Clamshell,2.05,0.03
+40x60x9,Box,25,0.25
+40x60x10,Box,26,0.25
+Clamshell 350G,Clamshell,1.35,0.025

@@ -1,0 +1,5 @@
+CostItem,MonthlyCost,Category
+Customs,120,Primary
+Analysis,100,Secondary
+Other,500,Secondary
+Interest Cost,"Calculated",Primary
