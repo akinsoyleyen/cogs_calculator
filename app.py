@@ -195,6 +195,10 @@ if selected_shipment_type == "Air":
 manual_logistics_cost_usd = 0.0
 if selected_shipment_type in ["Container", "Truck"]: manual_logistics_cost_usd = st.sidebar.number_input(f"Enter Fixed {selected_shipment_type} Price (USD):", min_value=0.0, value=4000.0, step=50.0, format="%.2f")
 
+# Add an option to exclude variable costs
+st.sidebar.subheader("Variable Costs")
+include_variable_costs = st.sidebar.checkbox("Include Variable Costs?", value=True)
+
 # --- Calculation Logic ---
 calculation_ready = ( selected_product and selected_pallet_type is not None and fixed_cost_selection is not None and selected_shipment_type != "Select..." and (selected_shipment_type != "Air" or selected_destination is not None) and quantity_input >= 1 # Ensure quantity is valid
 )
@@ -204,6 +208,9 @@ if calculation_ready and st.sidebar.button("Calculate Costs"):
     # --- Initialize variables ---
     # ... (Initialize calculation variables) ...
     total_raw_cost_usd=0.0; raw_cost_per_box_usd=0.0; total_variable_comp_cost_usd=0.0; total_per_unit_variable_comp_cost_usd=0.0; total_pallet_cost_usd=0.0; pallet_cost_per_box_usd=0.0; total_variable_costs_incl_pallets_usd=0.0; variable_costs_incl_pallets_per_box_usd=0.0; total_allocated_fixed_cost_usd=0.0; fixed_cost_per_unit_usd=0.0; total_cogs_usd=0.0; cogs_per_box_usd=0.0; cogs_per_kg_usd=0.0; total_logistics_cost_usd=0.0; logistics_per_box_usd=0.0; logistics_per_kg_gross_usd=0.0; total_unexpected_cost_usd=0.0; unexpected_cost_per_box_usd=0.0; total_delivered_cost_usd=0.0; delivered_cost_per_box_usd=0.0; delivered_cost_per_kg_net_usd=0.0; total_packaging_weight_kg=0.0; calculated_gross_weight_kg_per_box=0.0; final_shipping_gross_weight_kg=0.0; total_pallet_weight_kg=0.0; total_net_weight_kg=0.0; freight_or_fixed_logistics_cost=0.0; fixed_logistics_price=0.0; awb_cost=0.0; logistics_rate_per_kg=0.0; fixed_cost_label_suffix="(All)"; interest_cost_usd=0.0
+
+    # Initialize product_variable_costs_detailed as an empty DataFrame
+    product_variable_costs_detailed = pd.DataFrame()
 
     try: # Main calculation try block
         selected_product_str = str(selected_product)
@@ -222,36 +229,40 @@ if calculation_ready and st.sidebar.button("Calculate Costs"):
         raw_cost_per_kg_usd = raw_cost_per_kg_try * exchange_rate; raw_cost_per_box_usd = raw_cost_per_kg_usd * net_weight_kg; total_raw_cost_usd = raw_cost_per_box_usd * quantity_input
 
         # 4. Variable Component Costs & Packaging Weight
-        product_recipe = product_recipe_df[product_recipe_df['ProductID'].astype(str) == selected_product_str]
-        product_variable_costs_detailed = pd.DataFrame()
-        if not product_recipe.empty:
-            try:
-                product_variable_costs_detailed = pd.merge(
-                    product_recipe,
-                    components_df[['ComponentName', 'CostPerUnit_USD', 'WeightKG']],
-                    on='ComponentName', how='left'
-                )
-                if product_variable_costs_detailed.isnull().values.any():
-                    missing = product_variable_costs_detailed[
-                        product_variable_costs_detailed.isnull().any(axis=1)
-                    ]['ComponentName'].unique().tolist()
-                    raise ValueError(f"Details missing for component(s): {missing}")
-                product_variable_costs_detailed['QuantityPerProduct'] = pd.to_numeric(
-                    product_variable_costs_detailed['QuantityPerProduct'], errors='coerce'
-                )
-                assert not product_variable_costs_detailed['QuantityPerProduct'].isnull().any(), "Non-numeric Qty"
-                product_variable_costs_detailed['LineItemCost_USD'] = (
-                    product_variable_costs_detailed['CostPerUnit_USD'] * product_variable_costs_detailed['QuantityPerProduct']
-                )
-                total_per_unit_variable_comp_cost_usd = product_variable_costs_detailed['LineItemCost_USD'].sum()
-                total_variable_comp_cost_usd = total_per_unit_variable_comp_cost_usd * quantity_input
-                product_variable_costs_detailed['LineItemWeightKG'] = (
-                    product_variable_costs_detailed['WeightKG'] * product_variable_costs_detailed['QuantityPerProduct']
-                )
-                total_packaging_weight_kg = product_variable_costs_detailed['LineItemWeightKG'].sum()
-            except Exception as e_var:
-                st.error(f"Error calc variable costs/weights: {e_var}")
-                st.stop()
+        total_variable_comp_cost_usd = 0.0
+        total_per_unit_variable_comp_cost_usd = 0.0
+        total_packaging_weight_kg = 0.0
+
+        if include_variable_costs:
+            product_recipe = product_recipe_df[product_recipe_df['ProductID'].astype(str) == selected_product_str]
+            if not product_recipe.empty:
+                try:
+                    product_variable_costs_detailed = pd.merge(
+                        product_recipe,
+                        components_df[['ComponentName', 'CostPerUnit_USD', 'WeightKG']],
+                        on='ComponentName', how='left'
+                    )
+                    if product_variable_costs_detailed.isnull().values.any():
+                        missing = product_variable_costs_detailed[
+                            product_variable_costs_detailed.isnull().any(axis=1)
+                        ]['ComponentName'].unique().tolist()
+                        raise ValueError(f"Details missing for component(s): {missing}")
+                    product_variable_costs_detailed['QuantityPerProduct'] = pd.to_numeric(
+                        product_variable_costs_detailed['QuantityPerProduct'], errors='coerce'
+                    )
+                    assert not product_variable_costs_detailed['QuantityPerProduct'].isnull().any(), "Non-numeric Qty"
+                    product_variable_costs_detailed['LineItemCost_USD'] = (
+                        product_variable_costs_detailed['CostPerUnit_USD'] * product_variable_costs_detailed['QuantityPerProduct']
+                    )
+                    total_per_unit_variable_comp_cost_usd = product_variable_costs_detailed['LineItemCost_USD'].sum()
+                    total_variable_comp_cost_usd = total_per_unit_variable_comp_cost_usd * quantity_input
+                    product_variable_costs_detailed['LineItemWeightKG'] = (
+                        product_variable_costs_detailed['WeightKG'] * product_variable_costs_detailed['QuantityPerProduct']
+                    )
+                    total_packaging_weight_kg = product_variable_costs_detailed['LineItemWeightKG'].sum()
+                except Exception as e_var:
+                    st.error(f"Error calc variable costs/weights: {e_var}")
+                    st.stop()
 
         total_variable_costs_incl_pallets_usd = total_variable_comp_cost_usd + total_pallet_cost_usd
         variable_costs_incl_pallets_per_box_usd = total_variable_costs_incl_pallets_usd / quantity_input if quantity_input > 0 else 0
