@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import requests
+from datetime import date
 
 st.set_page_config(layout="wide", page_title="Batch Sales Calculator")
 st.title("📊 Batch Sales & Profit Projection")
@@ -55,6 +56,7 @@ if profit_markup_percentage is not None:
                 "Destination": destination,
                 "Product": product  # Add the product name here
             }
+
             for qty in batch_quantities:
                 # Recalculate logistics for this specific scenario
                 current_total_gross_weight = gross_weight_kg_per_box * qty
@@ -91,8 +93,11 @@ if profit_markup_percentage is not None:
 
             all_results.append(dest_results)
 
+            #Date time for new Column
+            dest_results["CalculationDate"] = date.today().isoformat()
+
         if all_results:
-            results_df_air = pd.DataFrame(all_results).set_index("Destination")
+            results_df_air = pd.DataFrame(all_results).set_index("Product")
             
             # Apply formatting only to numeric columns
             numeric_columns = results_df_air.select_dtypes(include=["number"]).columns
