@@ -94,7 +94,7 @@ if profit_markup_percentage is not None:
             all_results.append(dest_results)
 
             #Date time for new Column
-            dest_results["CalculationDate"] = date.today().strftime("%d-%m-%Y")
+            dest_results["CalculationDate"] = date.today().isoformat()
 
         if all_results:
             results_df_air = pd.DataFrame(all_results).set_index("Product")
