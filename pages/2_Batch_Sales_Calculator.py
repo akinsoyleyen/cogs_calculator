@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import requests
 
 st.set_page_config(layout="wide", page_title="Batch Sales Calculator")
 st.title("📊 Batch Sales & Profit Projection")
@@ -42,7 +43,6 @@ batch_quantities = [150, 300, 450, 600, 1000]
 
 # --- Calculations ---
 if profit_markup_percentage is not None:
-
     all_results = []
 
     # --- Air Freight Calculations (per destination) ---
@@ -83,12 +83,8 @@ if profit_markup_percentage is not None:
                 current_total_invoice = current_sales_price_per_box * qty
                 current_total_profit = current_total_invoice - current_delivered_cost_total
 
-                # Store results for this quantity (e.g., Price/Box, Total Invoice, Total Profit)
-                # Add more metrics if needed
+                # Store results for this quantity
                 dest_results[f"{qty} Boxes - Sales Price/Box"] = current_sales_price_per_box
-                #dest_results[f"{qty} Boxes - Total Invoice"] = current_total_invoice
-                #dest_results[f"{qty} Boxes - Total Profit"] = current_total_profit
-                #dest_results[f"{qty} Boxes - Del. Cost/Box"] = current_delivered_cost_per_box
 
             all_results.append(dest_results)
 
@@ -96,38 +92,53 @@ if profit_markup_percentage is not None:
             results_df_air = pd.DataFrame(all_results).set_index("Destination")
             # Display with formatting
             st.dataframe(results_df_air.style.format("${:,.2f}", na_rep="-"), use_container_width=True)
+
+            # 1) Render the button and capture its click state
+            push = st.button("Push Air Freight Projections to Airtable")
+
+            # 2) Only run this block if the user actually clicked
+            if push:
+                # Prepare payload
+                records = results_df_air.reset_index().to_dict(orient="records")
+                payload = {"records": records}
+
+                # Your Make.com webhook URL
+                webhook_url = "https://hook.eu2.make.com/b1rgrihpz73sujq8qsn4gthgr9blr0or"
+
+                resp = requests.post(webhook_url, json=payload)
+                if resp.ok:
+                    st.success("✅ Projections sent to Airtable!")
+                else:
+                    st.error(f"⚠️ Failed ({resp.status_code}): {resp.text}")
         else:
             st.write("No destinations found in Air Rates file.")
     else:
         st.warning("Air rates data was not loaded successfully. Cannot generate Air projections.")
 
-
     # --- Container / Truck Calculation (Fixed cost per box from main run) ---
     st.subheader(f"Projections for Container / Truck")
     if original_shipment_type in ["Container", "Truck"]:
-         st.write(f"Using the fixed Delivered Cost per Box calculated on the main page for '{original_shipment_type}': ${original_delivered_cost_per_box:,.3f}")
+        st.write(f"Using the fixed Delivered Cost per Box calculated on the main page for '{original_shipment_type}': ${original_delivered_cost_per_box:,.3f}")
 
-         ct_sales_price = original_delivered_cost_per_box * (1 + profit_markup_percentage / 100.0)
-         ct_profit_per_box = ct_sales_price - original_delivered_cost_per_box
-         ct_results = []
-         for qty in batch_quantities:
-             ct_results.append({
-                 "Batch Quantity": qty,
-                 "Sales Price / Box (USD)": ct_sales_price,
-                 "Total Invoice Value (USD)": ct_sales_price * qty,
-                 "Approx. Total Cost (USD)": original_delivered_cost_per_box * qty,
-                 "Approx. Total Profit (USD)": ct_profit_per_box * qty
-             })
-         results_df_ct = pd.DataFrame(ct_results)
-         st.dataframe(results_df_ct.style.format(subset=["Sales Price / Box (USD)", "Total Invoice Value (USD)", "Approx. Total Cost (USD)", "Approx. Total Profit (USD)"], formatter='${:,.2f}'), use_container_width=True)
-         st.metric("Calculated Sales Price per Box (C/T)", f"${ct_sales_price:,.2f}", f"{profit_markup_percentage:.1f}% Markup")
+        ct_sales_price = original_delivered_cost_per_box * (1 + profit_markup_percentage / 100.0)
+        ct_profit_per_box = ct_sales_price - original_delivered_cost_per_box
+        ct_results = []
+        for qty in batch_quantities:
+            ct_results.append({
+                "Batch Quantity": qty,
+                "Sales Price / Box (USD)": ct_sales_price,
+                "Total Invoice Value (USD)": ct_sales_price * qty,
+                "Approx. Total Cost (USD)": original_delivered_cost_per_box * qty,
+                "Approx. Total Profit (USD)": ct_profit_per_box * qty
+            })
+        results_df_ct = pd.DataFrame(ct_results)
+        st.dataframe(results_df_ct.style.format(subset=["Sales Price / Box (USD)", "Total Invoice Value (USD)", "Approx. Total Cost (USD)", "Approx. Total Profit (USD)"], formatter='${:,.2f}'), use_container_width=True)
+        st.metric("Calculated Sales Price per Box (C/T)", f"${ct_sales_price:,.2f}", f"{profit_markup_percentage:.1f}% Markup")
     else:
-         st.info("Container/Truck projections shown when Container or Truck is selected and calculated on the main page.")
-
+        st.info("Container/Truck projections shown when Container or Truck is selected and calculated on the main page.")
 
 else:
     st.info("Enter a profit markup percentage.")
-
 
 # Display the cost summary from the main calculation for reference
 st.markdown("---")
