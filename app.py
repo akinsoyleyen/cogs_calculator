@@ -229,40 +229,45 @@ if calculation_ready and st.sidebar.button("Calculate Costs"):
         raw_cost_per_kg_usd = raw_cost_per_kg_try * exchange_rate; raw_cost_per_box_usd = raw_cost_per_kg_usd * net_weight_kg; total_raw_cost_usd = raw_cost_per_box_usd * quantity_input
 
         # 4. Variable Component Costs & Packaging Weight
-        total_variable_comp_cost_usd = 0.0
-        total_per_unit_variable_comp_cost_usd = 0.0
         total_packaging_weight_kg = 0.0
 
+        # Always calculate packaging weight for logistics
+        product_recipe = product_recipe_df[product_recipe_df['ProductID'].astype(str) == selected_product_str]
+        if not product_recipe.empty:
+            try:
+                product_variable_costs_detailed = pd.merge(
+                    product_recipe,
+                    components_df[['ComponentName', 'CostPerUnit_USD', 'WeightKG']],
+                    on='ComponentName', how='left'
+                )
+                if product_variable_costs_detailed.isnull().values.any():
+                    missing = product_variable_costs_detailed[
+                        product_variable_costs_detailed.isnull().any(axis=1)
+                    ]['ComponentName'].unique().tolist()
+                    raise ValueError(f"Details missing for component(s): {missing}")
+                product_variable_costs_detailed['QuantityPerProduct'] = pd.to_numeric(
+                    product_variable_costs_detailed['QuantityPerProduct'], errors='coerce'
+                )
+                assert not product_variable_costs_detailed['QuantityPerProduct'].isnull().any(), "Non-numeric Qty"
+                product_variable_costs_detailed['LineItemWeightKG'] = (
+                    product_variable_costs_detailed['WeightKG'] * product_variable_costs_detailed['QuantityPerProduct']
+                )
+                total_packaging_weight_kg = product_variable_costs_detailed['LineItemWeightKG'].sum()
+            except Exception as e_var:
+                st.error(f"Error calc variable costs/weights: {e_var}")
+                st.stop()
+
+        # Only include variable costs in COGS if checked
         if include_variable_costs:
-            product_recipe = product_recipe_df[product_recipe_df['ProductID'].astype(str) == selected_product_str]
-            if not product_recipe.empty:
-                try:
-                    product_variable_costs_detailed = pd.merge(
-                        product_recipe,
-                        components_df[['ComponentName', 'CostPerUnit_USD', 'WeightKG']],
-                        on='ComponentName', how='left'
-                    )
-                    if product_variable_costs_detailed.isnull().values.any():
-                        missing = product_variable_costs_detailed[
-                            product_variable_costs_detailed.isnull().any(axis=1)
-                        ]['ComponentName'].unique().tolist()
-                        raise ValueError(f"Details missing for component(s): {missing}")
-                    product_variable_costs_detailed['QuantityPerProduct'] = pd.to_numeric(
-                        product_variable_costs_detailed['QuantityPerProduct'], errors='coerce'
-                    )
-                    assert not product_variable_costs_detailed['QuantityPerProduct'].isnull().any(), "Non-numeric Qty"
-                    product_variable_costs_detailed['LineItemCost_USD'] = (
-                        product_variable_costs_detailed['CostPerUnit_USD'] * product_variable_costs_detailed['QuantityPerProduct']
-                    )
-                    total_per_unit_variable_comp_cost_usd = product_variable_costs_detailed['LineItemCost_USD'].sum()
-                    total_variable_comp_cost_usd = total_per_unit_variable_comp_cost_usd * quantity_input
-                    product_variable_costs_detailed['LineItemWeightKG'] = (
-                        product_variable_costs_detailed['WeightKG'] * product_variable_costs_detailed['QuantityPerProduct']
-                    )
-                    total_packaging_weight_kg = product_variable_costs_detailed['LineItemWeightKG'].sum()
-                except Exception as e_var:
-                    st.error(f"Error calc variable costs/weights: {e_var}")
-                    st.stop()
+            product_variable_costs_detailed['LineItemCost_USD'] = (
+                product_variable_costs_detailed['CostPerUnit_USD'] * product_variable_costs_detailed['QuantityPerProduct']
+            )
+            total_per_unit_variable_comp_cost_usd = product_variable_costs_detailed['LineItemCost_USD'].sum()
+            total_variable_comp_cost_usd = total_per_unit_variable_comp_cost_usd * quantity_input
+        else:
+            product_variable_costs_detailed['LineItemCost_USD'] = 0.0
+            total_per_unit_variable_comp_cost_usd = 0.0
+            total_variable_comp_cost_usd = 0.0
 
         total_variable_costs_incl_pallets_usd = total_variable_comp_cost_usd + total_pallet_cost_usd
         variable_costs_incl_pallets_per_box_usd = total_variable_costs_incl_pallets_usd / quantity_input if quantity_input > 0 else 0
@@ -495,20 +500,18 @@ if calculation_ready and st.sidebar.button("Calculate Costs"):
     # --- Optional Variable Breakdown ---
     with st.expander("Show Detailed Variable Cost & Weight Breakdown (Per Box) - Components Only"):
         if not product_variable_costs_detailed.empty:
+            product_variable_costs_detailed['LineItemCost_USD'] = (
+                product_variable_costs_detailed['CostPerUnit_USD'] * product_variable_costs_detailed['QuantityPerProduct']
+            )
             breakdown_display = product_variable_costs_detailed[
                 ['ComponentName', 'QuantityPerProduct', 'CostPerUnit_USD', 'LineItemCost_USD', 'WeightKG', 'LineItemWeightKG']
-            ].rename(columns={
-                'CostPerUnit_USD': 'Cost/Unit ($)',
-                'LineItemCost_USD': 'TotalCost ($)',
-                'WeightKG': 'Wt/Unit (KG)',
-                'LineItemWeightKG': 'TotalWt (KG)'
-            })
+            ]
             st.dataframe(
                 breakdown_display.set_index('ComponentName').style.format({
-                    'Cost/Unit ($)': '${:,.6f}',
-                    'TotalCost ($)': '${:,.6f}',
-                    'Wt/Unit (KG)': '{:,.4f}',
-                    'TotalWt (KG)': '{:,.4f}'
+                    'CostPerUnit_USD': '${:,.6f}',
+                    'LineItemCost_USD': '${:,.6f}',
+                    'WeightKG': '{:,.4f}',
+                    'LineItemWeightKG': '{:,.4f}'
                 })
             )
             st.write(f"**Total Packaging Weight:** {total_packaging_weight_kg:.4f} KG")
