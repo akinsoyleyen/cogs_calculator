@@ -51,7 +51,10 @@ if profit_markup_percentage is not None:
         air_destinations = sorted(air_rates_df['Destination'].unique().tolist())
 
         for destination in air_destinations:
-            dest_results = {"Destination": destination}
+            dest_results = {
+                "Destination": destination,
+                "Product": product  # Add the product name here
+            }
             for qty in batch_quantities:
                 # Recalculate logistics for this specific scenario
                 current_total_gross_weight = gross_weight_kg_per_box * qty
@@ -90,11 +93,18 @@ if profit_markup_percentage is not None:
 
         if all_results:
             results_df_air = pd.DataFrame(all_results).set_index("Destination")
-            # Display with formatting
-            st.dataframe(results_df_air.style.format("${:,.2f}", na_rep="-"), use_container_width=True)
+            
+            # Apply formatting only to numeric columns
+            numeric_columns = results_df_air.select_dtypes(include=["number"]).columns
+            styled_df = results_df_air.style.format(
+                {col: "${:,.2f}" for col in numeric_columns}, na_rep="-"
+            )
+            
+            # Display the styled DataFrame
+            st.dataframe(styled_df, use_container_width=True)
 
             # 1) Render the button and capture its click state
-            push = st.button("Push Air Freight Projections to Airtable")
+            push = st.button("Push to Airtable")
 
             # 2) Only run this block if the user actually clicked
             if push:
