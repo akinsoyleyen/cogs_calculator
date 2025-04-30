@@ -256,7 +256,7 @@ rebate_rate_input = st.sidebar.number_input(
     min_value=0.0,
     value=0.0,        # Default to 0%
     step=0.1,
-    format="%.1f",    # Allow one decimal place for percentage
+    format="%.2f",    # Allow one decimal place for percentage
     help="Enter a percentage (e.g., 5 for 5%) to be added to the Total Delivered Cost."
 )
 
