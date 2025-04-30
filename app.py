@@ -27,9 +27,10 @@ with st.sidebar:
 
     st.title("Sidebar Title (Optional)")
 st.title("Product Cost & Logistics Calculator")
-st.info(f"""
-**Data Files:** `{COMPONENTS_CSV}`(TRY), `{RECIPE_CSV}`, `{FIXED_CSV}`(USD), `{WEIGHTS_CSV}`, `{AIR_RATES_CSV}`(USD), `{PALLETS_CSV}`(USD), `{PACKING_CSV}`.
-""")
+
+# st.info(f"""
+# **Data Files:** `{COMPONENTS_CSV}`(TRY), `{RECIPE_CSV}`, `{FIXED_CSV}`(USD), `{WEIGHTS_CSV}`, `{AIR_RATES_CSV}`(USD), `{PALLETS_CSV}`(USD), `{PACKING_CSV}`.
+# """)
 
 # --- Function to Fetch Exchange Rate ---
 # ... (function remains the same) ...
