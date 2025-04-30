@@ -24,12 +24,13 @@ unexpected_cost_per_box_usd = st.session_state['unexpected_cost_per_box_usd']
 gross_weight_kg_per_box = st.session_state['calculated_gross_weight_kg_per_box']
 air_rates_df = st.session_state['air_rates_df']
 original_shipment_type = st.session_state['selected_shipment_type']
-original_delivered_cost_per_box = st.session_state['delivered_cost_per_box_usd'] # Cost for original C/T run
+original_delivered_cost_per_box = st.session_state['final_cost_per_box_usd'] # Cost for original C/T run including rebate
 summary_data = st.session_state.get('summary_data', {}) # Get summary data too
 
 st.header(f"Projections for: `{product}`")
 st.write(f"Using base COGS/Unexpected Costs calculated from a run with batch size: `{original_quantity}`.")
 st.metric("Base COGS per Box (incl. Pallets, Interest)", f"${cogs_per_box_usd:,.3f}")
+st.metric("Original Delivered Cost per Box", f"${original_delivered_cost_per_box:,.3f}")
 st.metric("Base Unexpected Cost per Box", f"${unexpected_cost_per_box_usd:,.3f}")
 st.caption("Note: Total costs & profits below vary by destination for Air. Container/Truck uses the fixed cost from the main page run. Approximations apply.")
 st.markdown("---")

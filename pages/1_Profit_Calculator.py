@@ -5,14 +5,14 @@ st.set_page_config(layout="wide")
 st.title("💰 Profit Calculator")
 
 # Check if calculation results exist in session state
-if 'delivered_cost_per_box_usd' not in st.session_state:
+if 'final_cost_per_box_usd' not in st.session_state:
     st.warning("Please run a cost calculation on the main 'Cost Calculator' page first.")
     st.stop()
 
 # Retrieve data from session state
 product = st.session_state.get('last_calc_product', 'N/A')
 quantity = st.session_state.get('last_calc_quantity', 0)
-cost_per_box = st.session_state.get('delivered_cost_per_box_usd', 0.0)
+cost_per_box = st.session_state.get('final_cost_per_box_usd', 0.0)
 summary_data = st.session_state.get('summary_data', {})
 
 st.header(f"Profit Calculation for: `{product}`")
@@ -36,7 +36,7 @@ if sales_price_per_box > 0 and quantity > 0:
     profit_margin = (profit_per_box / sales_price_per_box) * 100 if sales_price_per_box > 0 else 0
 
     st.subheader("Profit Results")
-    col1, col2, col3, col4 = st.columns(3)
+    col1, col2, col3, = st.columns(3)
     col1.metric("Profit per Box (USD)", f"${profit_per_box:,.2f}")
     col2.metric("Total Profit for Batch (USD)", f"${total_profit:,.2f}")
     col3.metric("Profit Margin (%)", f"{profit_margin:,.1f}%")

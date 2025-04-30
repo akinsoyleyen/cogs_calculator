@@ -15,6 +15,17 @@ FRANKFURTER_API_URL = "https://api.frankfurter.app/latest?from=TRY&to=USD"; FALL
 INTEREST_RATE = 0.02; INTEREST_COST_ITEM_NAME = "Interest Cost" # Make sure this matches CSV exactly (case-insensitive check used later)
 
 st.set_page_config(layout="wide", page_title="Cost Calculator")
+# --- Add Logo to Sidebar Here ---
+with st.sidebar:
+    try:
+        # Adjust the width as needed
+        st.image("assets/Logo.png", width=100)
+    except FileNotFoundError:
+        st.error("Logo file not found. Make sure 'your_logo.png' is in the correct path.")
+    except Exception as e:
+        st.error(f"An error occurred loading the logo: {e}")
+
+    st.title("Sidebar Title (Optional)")
 st.title("Product Cost & Logistics Calculator")
 st.info(f"""
 **Data Files:** `{COMPONENTS_CSV}`(TRY), `{RECIPE_CSV}`, `{FIXED_CSV}`(USD), `{WEIGHTS_CSV}`, `{AIR_RATES_CSV}`(USD), `{PALLETS_CSV}`(USD), `{PACKING_CSV}`.
