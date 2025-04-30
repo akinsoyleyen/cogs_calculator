@@ -22,7 +22,7 @@ st.markdown("---")
 
 # Input for Sales Price
 sales_price_per_box = st.number_input(
-    "Enter Sales Price per Box (USD):",
+    "Enter Sales Price per Box (USD)(Default to 10% Markup):",
     min_value=0.0,
     value=cost_per_box * 1.1, # Default to 10% markup
     step=0.01,
@@ -36,7 +36,7 @@ if sales_price_per_box > 0 and quantity > 0:
     profit_margin = (profit_per_box / sales_price_per_box) * 100 if sales_price_per_box > 0 else 0
 
     st.subheader("Profit Results")
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(3)
     col1.metric("Profit per Box (USD)", f"${profit_per_box:,.2f}")
     col2.metric("Total Profit for Batch (USD)", f"${total_profit:,.2f}")
     col3.metric("Profit Margin (%)", f"{profit_margin:,.1f}%")
