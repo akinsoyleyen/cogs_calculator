@@ -25,7 +25,6 @@ with st.sidebar:
     except Exception as e:
         st.error(f"An error occurred loading the logo: {e}")
 
-    st.title("Sidebar Title (Optional)")
 st.title("Product Cost & Logistics Calculator")
 
 # st.info(f"""
