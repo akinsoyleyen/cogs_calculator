@@ -10,7 +10,9 @@ st.title("📊 Batch Sales & Profit Projection")
 required_keys = [
     'last_calc_product', 'last_calc_quantity', 'cogs_per_box_usd',
     'unexpected_cost_per_box_usd', 'calculated_gross_weight_kg_per_box',
-    'air_rates_df', 'selected_shipment_type', 'delivered_cost_per_box_usd'
+    'air_rates_df', 'selected_shipment_type', 'delivered_cost_per_box_usd',
+    'selected_pallet_type', 'boxes_per_pallet', 'weight_per_pallet_kg',  # Add these pallet-related keys
+    'num_pallets'  # Add this key
 ]
 if not all(key in st.session_state for key in required_keys):
     st.warning("⬅️ Please run a cost calculation on the main 'Cost Calculator' page first.")
@@ -27,11 +29,18 @@ original_shipment_type = st.session_state['selected_shipment_type']
 original_delivered_cost_per_box = st.session_state['final_cost_per_box_usd'] # Cost for original C/T run including rebate
 summary_data = st.session_state.get('summary_data', {}) # Get summary data too
 
+selected_pallet_type = st.session_state['selected_pallet_type']
+boxes_per_pallet = st.session_state['boxes_per_pallet']
+weight_per_pallet_kg = st.session_state['weight_per_pallet_kg']
+num_pallets = st.session_state['num_pallets']
+
 st.header(f"Projections for: `{product}`")
 st.write(f"Using base COGS/Unexpected Costs calculated from a run with batch size: `{original_quantity}`.")
 st.metric("Base COGS per Box (incl. Pallets, Interest)", f"${cogs_per_box_usd:,.3f}")
 st.metric("Original Delivered Cost per Box", f"${original_delivered_cost_per_box:,.3f}")
 st.metric("Base Unexpected Cost per Box", f"${unexpected_cost_per_box_usd:,.3f}")
+st.metric("Pallet Configuration", 
+    f"{selected_pallet_type}: {boxes_per_pallet} boxes/pallet, {weight_per_pallet_kg:.1f}kg/pallet")
 st.caption("Note: Total costs & profits below vary by destination for Air. Container/Truck uses the fixed cost from the main page run. Approximations apply.")
 st.markdown("---")
 
@@ -55,12 +64,20 @@ if profit_markup_percentage is not None:
         for destination in air_destinations:
             dest_results = {
                 "Destination": destination,
-                "Product": product  # Add the product name here
+                "Product": product,
+                "Pallet Type": selected_pallet_type,
+                "Boxes per Pallet": boxes_per_pallet
             }
 
             for qty in batch_quantities:
-                # Recalculate logistics for this specific scenario
-                current_total_gross_weight = gross_weight_kg_per_box * qty
+                # Calculate number of pallets needed for this quantity
+                num_pallets_needed = -(-qty // boxes_per_pallet)  # ceiling division
+                
+                # Calculate total gross weight including pallet weight
+                total_pallet_weight = num_pallets_needed * weight_per_pallet_kg
+                current_total_gross_weight = (gross_weight_kg_per_box * qty) + total_pallet_weight
+                
+                # Rest of the air freight calculations...
                 logistics_rate_per_kg = 0.0
                 awb_cost = 0.0
                 current_logistics_cost = 0.0
