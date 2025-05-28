@@ -449,6 +449,19 @@ if calculation_ready and st.sidebar.button("Calculate Costs"):
         st.session_state['summary_data'] = {k: v for k, v in summary_data.items() if v is not None}
 
         st.session_state['calculation_done'] = True
+        st.session_state['last_calc_product'] = selected_product
+        st.session_state['last_calc_quantity'] = quantity_input
+        st.session_state['cogs_per_box_usd'] = cogs_per_box_usd
+        st.session_state['unexpected_cost_per_box_usd'] = unexpected_cost_per_box_usd
+        st.session_state['calculated_gross_weight_kg_per_box'] = calculated_gross_weight_kg_per_box
+        st.session_state['air_rates_df'] = air_rates_df
+        st.session_state['selected_shipment_type'] = selected_shipment_type
+        st.session_state['final_cost_per_box_usd'] = final_cost_per_box_usd
+        st.session_state['selected_pallet_type'] = selected_pallet_type
+        st.session_state['boxes_per_pallet'] = boxes_per_pallet
+        st.session_state['weight_per_pallet_kg'] = weight_per_pallet_kg
+        st.session_state['num_pallets'] = num_pallets
+        st.session_state['summary_data'] = summary_data
 
     # --- Exception Handling for Main Calculation ---
     except ValueError as ve: calc_errors.append(f"Data Input Error: {ve}")

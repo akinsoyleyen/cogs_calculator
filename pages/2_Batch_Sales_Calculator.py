@@ -2,19 +2,31 @@ import streamlit as st
 import pandas as pd
 import requests
 from datetime import date
+import math  # Add if not present
 
 st.set_page_config(layout="wide", page_title="Batch Sales Calculator")
 st.title("📊 Batch Sales & Profit Projection")
 
+
 # Check if calculation results exist in session state
 required_keys = [
-    'last_calc_product', 'last_calc_quantity', 'cogs_per_box_usd',
-    'unexpected_cost_per_box_usd', 'calculated_gross_weight_kg_per_box',
-    'air_rates_df', 'selected_shipment_type', 'delivered_cost_per_box_usd',
-    'selected_pallet_type', 'boxes_per_pallet', 'weight_per_pallet_kg',  # Add these pallet-related keys
-    'num_pallets'  # Add this key
+    'calculation_done',           # Add this key
+    'last_calc_product',
+    'last_calc_quantity',
+    'cogs_per_box_usd',
+    'unexpected_cost_per_box_usd',
+    'calculated_gross_weight_kg_per_box',
+    'air_rates_df',
+    'selected_shipment_type',
+    'final_cost_per_box_usd',    # This is the correct key name
+    'selected_pallet_type',      # Add this key
+    'boxes_per_pallet',          # Add this key
+    'weight_per_pallet_kg',      # Add this key
+    'num_pallets'                # Add this key
 ]
-if not all(key in st.session_state for key in required_keys):
+
+# Check if calculation was done and all required keys exist
+if not st.session_state.get('calculation_done', False) or not all(key in st.session_state for key in required_keys):
     st.warning("⬅️ Please run a cost calculation on the main 'Cost Calculator' page first.")
     st.stop()
 
