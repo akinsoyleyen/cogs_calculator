@@ -77,7 +77,6 @@ if profit_markup_percentage is not None:
             dest_results = {
                 "Destination": destination,
                 "Product": product,
-                "Pallet Type": selected_pallet_type,
                 "Boxes per Pallet": boxes_per_pallet
             }
 
