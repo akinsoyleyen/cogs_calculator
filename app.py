@@ -227,7 +227,28 @@ else: none_index = pallet_types.index("None") if "None" in pallet_types else 0; 
 # ... (logic remains the same) ...
 st.sidebar.subheader("Costs") # Group remaining costs
 raw_cost_per_kg_try = st.sidebar.number_input("Raw Product Cost per KG (TRY):", min_value=0.0, value=50.0, step=0.1, format="%.2f")
-fixed_cost_options = ["All Costs (Primary + Secondary)", "Primary Costs Only"]; fixed_cost_selection = st.sidebar.radio("Include Fixed Costs:", fixed_cost_options, index=0)
+
+# --- Show Fixed Cost Totals in Radio Options ---
+if fixed_df is not None:
+    total_primary = fixed_df[fixed_df['Category'] == 'Primary']['MonthlyCost_USD'].sum()
+    total_all = fixed_df[fixed_df['Category'].isin(['Primary', 'Secondary'])]['MonthlyCost_USD'].sum()
+else:
+    total_primary = 0.0
+    total_all = 0.0
+fixed_cost_options = [
+    f"All Costs (Primary+Secondary) (${'{:,.2f}'.format(total_all)})",
+    f"Primary Costs Only (${'{:,.2f}'.format(total_primary)})"
+]
+fixed_cost_selection = st.sidebar.radio("Include Fixed Costs:", fixed_cost_options, index=0)
+
+# Map selection to logic
+if "Primary Only" in fixed_cost_selection:
+    fixed_categories_to_include = ['Primary']
+    fixed_cost_label_suffix = "(Primary Only)"
+else:
+    fixed_categories_to_include = ['Primary', 'Secondary']
+    fixed_cost_label_suffix = "(All)"
+
 unexpected_cost_try = st.sidebar.number_input("Unexpected Costs (Total TRY for Batch):", min_value=0.0, value=0.0, step=10.0, format="%.2f")
 include_variable_costs = st.sidebar.checkbox("Include Variable Component Costs in COGS?", value=True)
 
@@ -271,7 +292,7 @@ if calculation_ready and st.sidebar.button("Calculate Costs"):
 
     # --- Initialize variables ---
     # ... (Initialize ALL calculation variables used below to 0.0 or empty dataframes/strings) ...
-    total_raw_cost_usd=0.0; raw_cost_per_box_usd=0.0; total_variable_comp_cost_usd=0.0; total_per_unit_variable_comp_cost_usd=0.0; total_pallet_cost_usd=0.0; pallet_cost_per_box_usd=0.0; total_variable_costs_incl_pallets_usd=0.0; variable_costs_incl_pallets_per_box_usd=0.0; total_allocated_fixed_cost_usd=0.0; fixed_cost_per_unit_usd=0.0; total_cogs_usd=0.0; cogs_per_box_usd=0.0; cogs_per_kg_usd=0.0; total_logistics_cost_usd=0.0; logistics_per_box_usd=0.0; logistics_per_kg_gross_usd=0.0; total_unexpected_cost_usd=0.0; unexpected_cost_per_box_usd=0.0; total_delivered_cost_usd=0.0; delivered_cost_per_box_usd=0.0; delivered_cost_per_kg_net_usd=0.0; total_packaging_weight_kg=0.0; calculated_gross_weight_kg_per_box=0.0; final_shipping_gross_weight_kg=0.0; total_pallet_weight_kg=0.0; total_net_weight_kg=0.0; freight_or_fixed_logistics_cost=0.0; fixed_logistics_price=0.0; awb_cost=0.0; logistics_rate_per_kg=0.0; fixed_cost_label_suffix="(All)"; interest_cost_usd=0.0;
+    total_raw_cost_usd=0.0; raw_cost_per_box_usd=0.0; total_variable_comp_cost_usd=0.0; total_per_unit_variable_comp_cost_usd=0.0; total_pallet_cost_usd=0.0; pallet_cost_per_box_usd=0.0; total_variable_costs_incl_pallets_usd=0.0; variable_costs_incl_pallets_per_box_usd=0.0; total_allocated_fixed_cost_usd=0.0; fixed_cost_per_unit_usd=0.0; total_cogs_usd=0.0; cogs_per_box_usd=0.0; cogs_per_kg_usd=0.0; total_logistics_cost_usd=0.0; logistics_per_box_usd=0.0; logistics_per_kg_gross_usd=0.0; total_unexpected_cost_usd=0.0; unexpected_cost_per_box_usd=0.0; total_delivered_cost_usd=0.0; delivered_cost_per_box_usd=0.0; delivered_cost_per_kg_net_usd=0.0; total_packaging_weight_kg=0.0; calculated_gross_weight_kg_per_box=0.0; final_shipping_gross_weight_kg=0.0; total_pallet_weight_kg=0.0; total_net_weight_kg=0.0; freight_or_fixed_logistics_cost=0.0; fixed_logistics_price=0.0; awb_cost=0.0; logistics_rate_per_kg=0.0; interest_cost_usd=0.0;
     # *** NEW: Rebate variables ***
     rebate_percentage = 0.0; rebate_amount_usd = 0.0; final_total_cost_usd = 0.0; final_cost_per_box_usd = 0.0
 
@@ -359,8 +380,6 @@ if calculation_ready and st.sidebar.button("Calculate Costs"):
 
         # --- 5. Standard Fixed Costs (Filtered, Excl. Interest) ---
         # ... (logic remains the same) ...
-        if fixed_cost_selection == "Primary Costs Only": fixed_categories_to_include = ['Primary']; fixed_cost_label_suffix = "(Primary Only)"
-        else: fixed_categories_to_include = ['Primary', 'Secondary']; fixed_cost_label_suffix = "(All)"
         standard_fixed_df = fixed_df[ (fixed_df['CostItem'].str.strip().str.lower() != INTEREST_COST_ITEM_NAME.lower()) & (fixed_df['Category'].isin(fixed_categories_to_include)) ]
         total_standard_fixed_cost_usd = standard_fixed_df['MonthlyCost_USD'].sum()
 
