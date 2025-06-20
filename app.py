@@ -237,7 +237,8 @@ else:
     total_all = 0.0
 fixed_cost_options = [
     f"All Costs (Primary+Secondary) (${'{:,.2f}'.format(total_all)})",
-    f"Primary Costs Only (${'{:,.2f}'.format(total_primary)})"
+    f"Primary Costs Only (${'{:,.2f}'.format(total_primary)})",
+    "Add 10% of total value"
 ]
 fixed_cost_selection = st.sidebar.radio("Include Fixed Costs:", fixed_cost_options, index=0)
 
@@ -245,9 +246,15 @@ fixed_cost_selection = st.sidebar.radio("Include Fixed Costs:", fixed_cost_optio
 if "Primary Only" in fixed_cost_selection:
     fixed_categories_to_include = ['Primary']
     fixed_cost_label_suffix = "(Primary Only)"
+    fixed_cost_mode = "standard"
+elif "10% of total value" in fixed_cost_selection:
+    fixed_categories_to_include = []  # Not used in this mode
+    fixed_cost_label_suffix = "(10% of Total Value)"
+    fixed_cost_mode = "percent"
 else:
     fixed_categories_to_include = ['Primary', 'Secondary']
     fixed_cost_label_suffix = "(All)"
+    fixed_cost_mode = "standard"
 
 unexpected_cost_try = st.sidebar.number_input("Unexpected Costs (Total TRY for Batch):", min_value=0.0, value=0.0, step=10.0, format="%.2f")
 include_variable_costs = st.sidebar.checkbox("Include Variable Component Costs in COGS?", value=True)
@@ -378,11 +385,6 @@ if calculation_ready and st.sidebar.button("Calculate Costs"):
         total_batch_gross_weight_boxes_only = calculated_gross_weight_kg_per_box * quantity_input
         final_shipping_gross_weight_kg = total_batch_gross_weight_boxes_only + total_pallet_weight_kg
 
-        # --- 5. Standard Fixed Costs (Filtered, Excl. Interest) ---
-        # ... (logic remains the same) ...
-        standard_fixed_df = fixed_df[ (fixed_df['CostItem'].str.strip().str.lower() != INTEREST_COST_ITEM_NAME.lower()) & (fixed_df['Category'].isin(fixed_categories_to_include)) ]
-        total_standard_fixed_cost_usd = standard_fixed_df['MonthlyCost_USD'].sum()
-
         # --- 6. Logistics Costs (Freight/Fixed ONLY) ---
         # ... (logic remains the same) ...
         freight_or_fixed_logistics_cost = 0.0; logistics_rate_per_kg = 0.0; awb_cost = 0.0; fixed_logistics_price = 0.0; logistics_cost_source = "N/A"
@@ -405,28 +407,46 @@ if calculation_ready and st.sidebar.button("Calculate Costs"):
         total_unexpected_cost_usd = unexpected_cost_try * exchange_rate
         unexpected_cost_per_box_usd = total_unexpected_cost_usd / quantity_input if quantity_input > 0 else 0
 
-        # --- 8. Interest Cost (Based on sum of others) ---
+        # --- 8. Fixed Costs (10% Option Calculated Here, after Logistics) ---
+        if fixed_cost_mode == "percent":
+            total_value_for_percent = total_raw_cost_usd + total_variable_costs_incl_pallets_usd + total_logistics_cost_usd + total_unexpected_cost_usd
+            total_standard_fixed_cost_usd = total_value_for_percent * 0.10
+        else:
+            standard_fixed_df = fixed_df[ (fixed_df['CostItem'].str.strip().str.lower() != INTEREST_COST_ITEM_NAME.lower()) & (fixed_df['Category'].isin(fixed_categories_to_include)) ]
+            total_standard_fixed_cost_usd = standard_fixed_df['MonthlyCost_USD'].sum()
+
+        # --- 9. Interest Cost (Based on sum of others) ---
         # ... (logic remains the same) ...
         interest_cost_usd = 0.0
         interest_base_cost = total_raw_cost_usd + total_variable_costs_incl_pallets_usd + total_standard_fixed_cost_usd + total_logistics_cost_usd + total_unexpected_cost_usd
         interest_item_row = fixed_df[fixed_df['CostItem'].str.strip().str.lower() == INTEREST_COST_ITEM_NAME.lower()]
-        if not interest_item_row.empty:
-             if interest_item_row['Category'].iloc[0] in fixed_categories_to_include: interest_cost_usd = interest_base_cost * INTEREST_RATE
+        if hasattr(interest_item_row, 'empty') and not interest_item_row.empty:
+            if fixed_cost_mode == "percent":
+                # In percent mode, always add interest if the row exists
+                interest_cost_usd = interest_base_cost * INTEREST_RATE
+            else:
+                # In standard mode, only add if the category is included
+                interest_category = interest_item_row['Category'].iloc[0] if 'Category' in interest_item_row.columns and len(interest_item_row) > 0 else None
+                if interest_category in fixed_categories_to_include:
+                    interest_cost_usd = interest_base_cost * INTEREST_RATE
 
-        # --- 9. FINAL Fixed Costs & COGS ---
+        # --- 10. FINAL Fixed Costs & COGS ---
         # ... (logic remains the same) ...
-        total_allocated_fixed_cost_usd = total_standard_fixed_cost_usd + interest_cost_usd
+        if fixed_cost_mode == "percent":
+            total_allocated_fixed_cost_usd = total_standard_fixed_cost_usd  # No interest in this mode
+        else:
+            total_allocated_fixed_cost_usd = total_standard_fixed_cost_usd + interest_cost_usd
         fixed_cost_per_unit_usd = total_allocated_fixed_cost_usd / quantity_input if quantity_input > 0 else 0
         total_cogs_usd = total_raw_cost_usd + total_variable_costs_incl_pallets_usd + total_allocated_fixed_cost_usd
         cogs_per_box_usd = total_cogs_usd / quantity_input if quantity_input > 0 else 0; total_net_weight_kg = net_weight_kg * quantity_input; cogs_per_kg_usd = total_cogs_usd / total_net_weight_kg if total_net_weight_kg > 0 else 0
 
-        # --- 10. Total Delivered Cost (Before Rebate) ---
+        # --- 11. Total Delivered Cost (Before Rebate) ---
         # ... (logic remains the same) ...
         total_delivered_cost_usd = total_cogs_usd + total_logistics_cost_usd + total_unexpected_cost_usd
         delivered_cost_per_box_usd = total_delivered_cost_usd / quantity_input if quantity_input > 0 else 0
         delivered_cost_per_kg_net_usd = total_delivered_cost_usd / total_net_weight_kg if total_net_weight_kg > 0 else 0
 
-        # *** NEW: 11. RETAILER REBATE/FEE CALCULATION ***
+        # *** NEW: 12. RETAILER REBATE/FEE CALCULATION ***
         rebate_percentage = rebate_rate_input # Get percentage from sidebar input
         # Calculate the rebate amount based on the total delivered cost
         rebate_amount_usd = total_delivered_cost_usd * (rebate_percentage / 100.0)
