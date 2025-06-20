@@ -593,7 +593,7 @@ if calculation_ready and st.sidebar.button("Calculate Costs"):
                 }
                 plot_data_filtered = {k: v for k, v in plot_data.items() if v > 0}
                 if plot_data_filtered:
-                    plot_df = pd.DataFrame(list(plot_data_filtered.items()), columns=['Cost Category', 'Total Cost (USD)'])
+                    plot_df = pd.DataFrame(list(plot_data_filtered.items()), columns=["Cost Category", "Total Cost (USD)"])
                     fig = px.pie(plot_df, names='Cost Category', values='Total Cost (USD)',
                                  title='Cost Breakdown by Component (Before Rebate)', # Updated title
                                  hole=.3)
@@ -603,8 +603,8 @@ if calculation_ready and st.sidebar.button("Calculate Costs"):
 
                 # Summary Table: Shows the FULL breakdown including rebate and final total
                 st.subheader("Full Cost Breakdown Table")
-                summary_df = pd.DataFrame(list(summary_data_dict.items()), columns=['Cost Category', 'Total Cost (USD)'])
-                st.dataframe(summary_df.style.format({'Total Cost (USD)': '${:,.2f}'}), use_container_width=True)
+                summary_df = pd.DataFrame(list(summary_data_dict.items()), columns=["Cost Category", "Total Cost (USD)"])
+                st.dataframe(summary_df.style.format({"Total Cost (USD)": "${:,.2f}"}), use_container_width=True)
             else: st.write("Summary data not available (Run calculation first).")
 
 
@@ -633,7 +633,6 @@ if calculation_ready and st.sidebar.button("Calculate Costs"):
                  if include_variable_costs:
                      formatters['Cost/Unit ($)'] = '${:,.6f}'
                      formatters['TotalCost ($)'] = '${:,.6f}'
-
                  st.dataframe(breakdown_display.set_index('ComponentName').style.format(formatters))
                  st.write(f"**Total Component Packaging Weight (per Box):** {total_packaging_weight_kg:.4f} KG")
                  if not include_variable_costs:
