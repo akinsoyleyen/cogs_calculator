@@ -654,24 +654,14 @@ if calculation_ready and st.sidebar.button("Calculate Costs"):
             total_standard_fixed_cost_usd = standard_fixed_df['MonthlyCost_USD'].sum()
 
         # --- 9. Interest Cost (Based on sum of others) ---
-        # ... (logic remains the same) ...
-        interest_cost_usd = 0.0
+        # Interest is always calculated as 2% of the preceding costs, regardless of other settings.
         interest_base_cost = total_raw_cost_usd + total_variable_costs_incl_pallets_usd + total_standard_fixed_cost_usd + total_logistics_cost_usd + total_unexpected_cost_usd
-        interest_item_row = fixed_df[fixed_df['CostItem'].str.strip().str.lower() == INTEREST_COST_ITEM_NAME.lower()]
-        if hasattr(interest_item_row, 'empty') and not interest_item_row.empty:
-            if fixed_cost_mode == "percent":
-                # In percent mode, always add interest if the row exists
-                interest_cost_usd = interest_base_cost * INTEREST_RATE
-            else:
-                # In standard mode, only add if the category is included
-                interest_category = interest_item_row['Category'].iloc[0] if 'Category' in interest_item_row.columns and len(interest_item_row) > 0 else None
-                if interest_category in fixed_categories_to_include:
-                    interest_cost_usd = interest_base_cost * INTEREST_RATE
+        interest_cost_usd = interest_base_cost * INTEREST_RATE
 
         # --- 10. FINAL Fixed Costs & COGS ---
         # ... (logic remains the same) ...
         if fixed_cost_mode == "percent":
-            total_allocated_fixed_cost_usd = total_standard_fixed_cost_usd  # No interest in this mode
+            total_allocated_fixed_cost_usd = total_standard_fixed_cost_usd + interest_cost_usd  # Always include interest
         else:
             total_allocated_fixed_cost_usd = total_standard_fixed_cost_usd + interest_cost_usd
         fixed_cost_per_unit_usd = total_allocated_fixed_cost_usd / quantity_input if quantity_input > 0 else 0
@@ -721,7 +711,7 @@ if calculation_ready and st.sidebar.button("Calculate Costs"):
             "1. Raw Product": format_cost_by_mode(total_raw_cost_usd, currency_display_mode),
             "2. Variable Costs (incl. Pallets)": format_cost_by_mode(total_variable_costs_incl_pallets_usd, currency_display_mode),
             f"3. Fixed Costs {fixed_cost_label_suffix}": format_cost_by_mode(total_allocated_fixed_cost_usd, currency_display_mode),
-            f"   (Calc. Interest @ {INTEREST_RATE:.1%})": format_cost_by_mode(interest_cost_usd, currency_display_mode) if interest_cost_usd > 0 else None, # Show only if non-zero
+            f"   (Calc. Interest @ {INTEREST_RATE:.1%})": format_cost_by_mode(interest_cost_usd, currency_display_mode), # Always show, even if zero
             "   Subtotal COGS": format_cost_by_mode(total_cogs_usd, currency_display_mode),
             f"4. {selected_shipment_type} Freight/Fee": format_cost_by_mode(freight_or_fixed_logistics_cost, currency_display_mode),
             "   Subtotal Logistics": format_cost_by_mode(total_logistics_cost_usd, currency_display_mode),
@@ -746,6 +736,7 @@ if calculation_ready and st.sidebar.button("Calculate Costs"):
         st.session_state['boxes_per_pallet'] = boxes_per_pallet
         st.session_state['weight_per_pallet_kg'] = weight_per_pallet_kg
         st.session_state['num_pallets'] = num_pallets
+        # OVERWRITE THE CLEANED DICTIONARY WITH THE ORIGINAL ONE
         st.session_state['summary_data'] = summary_data
 
     # --- Exception Handling for Main Calculation ---
