@@ -46,6 +46,12 @@ boxes_per_pallet = st.session_state['boxes_per_pallet']
 weight_per_pallet_kg = st.session_state['weight_per_pallet_kg']
 num_pallets = st.session_state['num_pallets']
 
+# Validate pallet configuration
+if not boxes_per_pallet or boxes_per_pallet <= 0:
+    st.error("❌ Invalid pallet configuration: 'Boxes per Pallet' must be greater than 0.")
+    st.write("Please run a cost calculation on the main page with a valid pallet configuration.")
+    st.stop()
+
 st.header(f"Projections for: `{product}`")
 st.write(f"Using base COGS/Unexpected Costs calculated from a run with batch size: `{original_quantity}`.")
 st.metric("Base COGS per Box (incl. Pallets, Interest)", f"${cogs_per_box_usd:,.3f}")
@@ -82,7 +88,11 @@ if profit_markup_percentage is not None:
 
             for qty in batch_quantities:
                 # Calculate number of pallets needed for this quantity
-                num_pallets_needed = -(-qty // boxes_per_pallet)  # ceiling division
+                try:
+                    num_pallets_needed = -(-qty // boxes_per_pallet)  # ceiling division
+                except ZeroDivisionError:
+                    st.error(f"❌ Division by zero error: boxes_per_pallet = {boxes_per_pallet}")
+                    st.stop()
                 
                 # Calculate total gross weight including pallet weight
                 total_pallet_weight = num_pallets_needed * weight_per_pallet_kg
@@ -189,6 +199,8 @@ st.markdown("---")
 st.subheader("Cost Summary Used (Total Batch Costs from Main Calculator run)")
 if summary_data:
     summary_df = pd.DataFrame(list(summary_data.items()), columns=['Cost Category', 'Total Cost (USD)'])
-    st.dataframe(summary_df.style.format({'Total Cost (USD)': '${:,.2f}'}), use_container_width=True)
+    
+    # Display without additional formatting since the data comes pre-formatted from main app
+    st.dataframe(summary_df, use_container_width=True)
 else:
     st.write("Cost summary data not available from previous calculation.")

@@ -5,16 +5,36 @@ import requests
 import os
 from datetime import datetime
 import plotly.express as px
+import io
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill, Alignment
+import base64
 
-# --- Define File Paths & Constants---
-# ... (paths remain the same) ...
-COMPONENTS_CSV = "components.csv"; RECIPE_CSV = "product_recipe.csv"; FIXED_CSV = "fixed_costs.csv"
-WEIGHTS_CSV = "product_weights.csv"; AIR_RATES_CSV = "air_freight_rates.csv"; PALLETS_CSV = "pallets.csv"
-PACKING_CSV = "product_packing.csv" # New packing file
-FRANKFURTER_API_URL = "https://api.frankfurter.app/latest?from=TRY&to=USD"; FALLBACK_TRY_TO_USD = 0.0262
-INTEREST_RATE = 0.02; INTEREST_COST_ITEM_NAME = "Interest Cost" # Make sure this matches CSV exactly (case-insensitive check used later)
+# --- Constants ---
+FALLBACK_TRY_TO_USD = 0.037  # Fallback rate if API fails
+FALLBACK_USD_TO_EUR = 0.85   # Fallback USD to EUR rate if API fails
+INTEREST_RATE = 0.02  # 2% interest rate
+INTEREST_COST_ITEM_NAME = "Calc. Interest"  # Name for calculated interest cost
 
+# --- API URLs ---
+FRANKFURTER_API_URL = "https://api.frankfurter.app/latest?from=TRY&to=USD"
+FRANKFURTER_USD_EUR_API_URL = "https://api.frankfurter.app/latest?from=USD&to=EUR"
+
+# --- Global variables ---
+usd_to_eur_rate = FALLBACK_USD_TO_EUR  # Initialize with fallback rate
+
+# --- File Paths ---
+COMPONENTS_CSV = "components.csv"
+RECIPE_CSV = "product_recipe.csv"
+FIXED_CSV = "fixed_costs.csv"
+WEIGHTS_CSV = "product_weights.csv"
+AIR_RATES_CSV = "air_freight_rates.csv"
+PALLETS_CSV = "pallets.csv"
+PACKING_CSV = "product_packing.csv"
+
+# --- Streamlit Setup ---
 st.set_page_config(layout="wide", page_title="Cost Calculator")
+
 # --- Add Logo to Sidebar Here ---
 with st.sidebar:
     try:
@@ -26,6 +46,172 @@ with st.sidebar:
         st.error(f"An error occurred loading the logo: {e}")
 
 st.title("Product Cost & Logistics Calculator")
+
+# --- Exchange Rate Functions ---
+@st.cache_data(ttl=3600)
+def get_usd_to_eur_rate():
+    try:
+        response = requests.get(FRANKFURTER_USD_EUR_API_URL, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        rate = data.get('rates', {}).get('EUR')
+        date = data.get('date', 'N/A')
+        if rate:
+            st.session_state['usd_eur_rate_source'] = f"API ({date})"
+            st.session_state['usd_eur_rate_date'] = date
+            return float(rate)
+        else:
+            st.session_state['usd_eur_rate_source'] = "API Error (Rate Missing)"
+            st.session_state['usd_eur_rate_date'] = None
+            return None
+    except Exception as e:
+        st.session_state['usd_eur_rate_source'] = f"API Failed ({type(e).__name__})"
+        st.session_state['usd_eur_rate_date'] = None
+        return None
+
+# --- Helper function to format costs with both USD and Euro ---
+def format_cost_usd_eur(usd_amount):
+    """Format a USD amount to show both USD and Euro values"""
+    if usd_amount == 0:
+        return "$0.00 / €0.00"
+    
+    # Get the current USD to EUR rate from sidebar
+    global usd_to_eur_rate
+    if usd_to_eur_rate is None:
+        usd_to_eur_rate = FALLBACK_USD_TO_EUR
+    
+    eur_amount = usd_amount * usd_to_eur_rate
+    return f"${usd_amount:,.2f} / €{eur_amount:,.2f}"
+
+def format_cost_usd_only(usd_amount):
+    """Format a USD amount to show only USD values"""
+    if usd_amount == 0:
+        return "$0.00"
+    return f"${usd_amount:,.2f}"
+
+def format_cost_eur_only(usd_amount):
+    """Format a USD amount to show only EUR values"""
+    if usd_amount == 0:
+        return "€0.00"
+    
+    # Get the current USD to EUR rate from sidebar
+    global usd_to_eur_rate
+    if usd_to_eur_rate is None:
+        usd_to_eur_rate = FALLBACK_USD_TO_EUR
+    
+    eur_amount = usd_amount * usd_to_eur_rate
+    return f"€{eur_amount:,.2f}"
+
+def format_cost_by_mode(usd_amount, mode):
+    """Format cost based on display mode"""
+    if mode == "EUR Only":
+        return format_cost_eur_only(usd_amount)
+    else:  # USD Only (default)
+        return format_cost_usd_only(usd_amount)
+
+def calculate_profit_margins(cost_per_box, sales_price_per_box):
+    """Calculate profit margins for given cost and sales price"""
+    if sales_price_per_box <= 0:
+        return {"profit_per_box": 0, "profit_margin_percent": 0, "roi_percent": 0}
+    
+    profit_per_box = sales_price_per_box - cost_per_box
+    profit_margin_percent = (profit_per_box / sales_price_per_box) * 100 if sales_price_per_box > 0 else 0
+    roi_percent = (profit_per_box / cost_per_box) * 100 if cost_per_box > 0 else 0
+    
+    return {
+        "profit_per_box": profit_per_box,
+        "profit_margin_percent": profit_margin_percent,
+        "roi_percent": roi_percent
+    }
+
+# --- Export Helper Functions ---
+def create_csv_export(summary_data_dict, profit_data, calculation_details):
+    """Create CSV export of calculation results"""
+    export_data = []
+    
+    # Add calculation details
+    export_data.append(["Calculation Details"])
+    export_data.append(["Date", datetime.now().strftime("%Y-%m-%d %H:%M:%S")])
+    export_data.append(["Product", calculation_details.get('product', 'N/A')])
+    export_data.append(["Quantity", calculation_details.get('quantity', 'N/A')])
+    export_data.append(["Shipment Type", calculation_details.get('shipment_type', 'N/A')])
+    export_data.append(["Fixed Cost Mode", calculation_details.get('fixed_cost_mode', 'N/A')])
+    export_data.append([])
+    
+    # Add cost breakdown
+    export_data.append(["Cost Breakdown"])
+    for key, value in summary_data_dict.items():
+        if value is not None:
+            export_data.append([key, value])
+    export_data.append([])
+    
+    # Add profit analysis if available
+    if profit_data:
+        export_data.append(["Profit Analysis"])
+        export_data.append(["Cost per Box (USD)", f"${profit_data.get('final_cost_per_box_usd', 0):,.2f}"])
+        export_data.append(["Cost per Box (EUR)", f"€{profit_data.get('final_cost_per_box_usd', 0) * usd_to_eur_rate:,.2f}"])
+    
+    return pd.DataFrame(export_data)
+
+def create_excel_export(summary_data_dict, profit_data, calculation_details, sensitivity_data):
+    """Create Excel export with multiple sheets and formatting"""
+    wb = Workbook()
+    
+    # Remove default sheet
+    wb.remove(wb.active)
+    
+    # Summary sheet
+    ws_summary = wb.create_sheet("Cost Summary")
+    ws_summary.append(["Cost Calculator - Summary Report"])
+    ws_summary.append([f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"])
+    ws_summary.append([])
+    
+    # Add calculation details
+    ws_summary.append(["Calculation Details"])
+    ws_summary.append(["Product", calculation_details.get('product', 'N/A')])
+    ws_summary.append(["Quantity", calculation_details.get('quantity', 'N/A')])
+    ws_summary.append(["Shipment Type", calculation_details.get('shipment_type', 'N/A')])
+    ws_summary.append([])
+    
+    # Add cost breakdown
+    ws_summary.append(["Cost Breakdown"])
+    for key, value in summary_data_dict.items():
+        if value is not None:
+            ws_summary.append([key, value])
+    
+    # Profit Analysis sheet
+    if profit_data:
+        ws_profit = wb.create_sheet("Profit Analysis")
+        ws_profit.append(["Profit Analysis"])
+        ws_profit.append([f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"])
+        ws_profit.append([])
+        ws_profit.append(["Cost per Box (USD)", f"${profit_data.get('final_cost_per_box_usd', 0):,.2f}"])
+        ws_profit.append(["Cost per Box (EUR)", f"€{profit_data.get('final_cost_per_box_usd', 0) * usd_to_eur_rate:,.2f}"])
+        
+        # Add sensitivity analysis
+        if sensitivity_data:
+            ws_profit.append([])
+            ws_profit.append(["Sensitivity Analysis"])
+            headers = list(sensitivity_data[0].keys())
+            ws_profit.append(headers)
+            for row in sensitivity_data:
+                ws_profit.append([row[header] for header in headers])
+    
+    return wb
+
+def get_download_link(data, filename, file_type):
+    """Generate download link for files"""
+    if file_type == "csv":
+        csv = data.to_csv(index=False, header=False)
+        b64 = base64.b64encode(csv.encode()).decode()
+        href = f'<a href="data:file/csv;base64,{b64}" download="{filename}">Download CSV</a>'
+    elif file_type == "excel":
+        buffer = io.BytesIO()
+        data.save(buffer)
+        buffer.seek(0)
+        b64 = base64.b64encode(buffer.read()).decode()
+        href = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="{filename}">Download Excel</a>'
+    return href
 
 # --- Function to Fetch Exchange Rate ---
 # ... (function remains the same) ...
@@ -54,6 +240,9 @@ def get_try_to_usd_rate():
 # ... (initialization remains the same) ...
 if 'rate_source' not in st.session_state: st.session_state['rate_source'] = "Not Fetched"
 if 'rate_date' not in st.session_state: st.session_state['rate_date'] = None
+# Add USD to EUR rate tracking
+if 'usd_eur_rate_source' not in st.session_state: st.session_state['usd_eur_rate_source'] = "Not Fetched"
+if 'usd_eur_rate_date' not in st.session_state: st.session_state['usd_eur_rate_date'] = None
 # Add defaults for values needed by other pages if not present
 if 'calculation_done' not in st.session_state: st.session_state['calculation_done'] = False
 if 'final_cost_per_box_usd' not in st.session_state: st.session_state['final_cost_per_box_usd'] = 0.0
@@ -73,6 +262,55 @@ elif rate_source_choice == "Manual Input":
     exchange_rate = manual_rate_input; rate_display_source = "Manual Input"; rate_display_value = f"{exchange_rate:.6f}" if exchange_rate is not None else "Error"
 if exchange_rate is None or not isinstance(exchange_rate, (int, float)) or exchange_rate <= 0: exchange_rate = FALLBACK_TRY_TO_USD; rate_display_source = "Fallback Default"; rate_display_value = f"{exchange_rate:.6f}"; st.sidebar.warning("Using default fallback rate.")
 st.sidebar.metric(label=f"TRY to USD Rate Used ({rate_display_source})", value=rate_display_value)
+
+# --- USD to EUR Exchange Rate Handling ---
+st.sidebar.subheader("Exchange Rate (USD->EUR)")
+
+usd_eur_rate_source_choice = st.sidebar.radio("Select USD->EUR Rate Source:", ("Automatic (Frankfurter API)", "Manual Input"), key="usd_eur_rate_choice", index=0)
+manual_usd_eur_rate_input = None; usd_eur_rate_display_value = "N/A"; usd_eur_rate_display_source = "Not Set"
+
+if usd_eur_rate_source_choice == "Automatic (Frankfurter API)":
+    usd_to_eur_rate = get_usd_to_eur_rate()
+    if usd_to_eur_rate is None: 
+        st.sidebar.warning(f"⚠️ API Failed ({st.session_state.get('usd_eur_rate_source', '?')}). Enter rate manually:")
+        manual_usd_eur_rate_input = st.sidebar.number_input("Enter USD to EUR Rate (Fallback):", min_value=0.0001, value=FALLBACK_USD_TO_EUR, step=0.0001, format="%.4f", key="manual_usd_eur_rate_fallback")
+        usd_to_eur_rate = manual_usd_eur_rate_input
+        usd_eur_rate_display_source = "Manual Fallback"
+        usd_eur_rate_display_value = f"{usd_to_eur_rate:.4f}" if usd_to_eur_rate is not None else "Error"
+    else: 
+        usd_eur_rate_display_source = st.session_state.get('usd_eur_rate_source', 'API')
+        usd_eur_rate_display_value = f"{usd_to_eur_rate:.4f}"
+        st.sidebar.success("Live USD->EUR rate fetched!")
+elif usd_eur_rate_source_choice == "Manual Input":
+    manual_usd_eur_rate_input = st.sidebar.number_input("Enter USD to EUR Rate Manually:", min_value=0.0001, value=FALLBACK_USD_TO_EUR, step=0.0001, format="%.4f", key="manual_usd_eur_rate_direct")
+    usd_to_eur_rate = manual_usd_eur_rate_input
+    usd_eur_rate_display_source = "Manual Input"
+    usd_eur_rate_display_value = f"{usd_to_eur_rate:.4f}" if usd_to_eur_rate is not None else "Error"
+
+if usd_to_eur_rate is None or not isinstance(usd_to_eur_rate, (int, float)) or usd_to_eur_rate <= 0: 
+    usd_to_eur_rate = FALLBACK_USD_TO_EUR
+    usd_eur_rate_display_source = "Fallback Default"
+    usd_eur_rate_display_value = f"{usd_to_eur_rate:.4f}"
+    st.sidebar.warning("Using default USD->EUR fallback rate.")
+
+st.sidebar.metric(label=f"USD to EUR Rate Used ({usd_eur_rate_display_source})", value=usd_eur_rate_display_value)
+
+# --- Rate Refresh Button ---
+col_refresh1, col_refresh2 = st.sidebar.columns(2)
+if col_refresh1.button("🔄 Refresh TRY->USD", help="Refresh TRY to USD exchange rate"):
+    st.cache_data.clear()
+    st.rerun()
+if col_refresh2.button("🔄 Refresh USD->EUR", help="Refresh USD to EUR exchange rate"):
+    st.cache_data.clear()
+    st.rerun()
+
+# --- Currency Display Toggle ---
+st.sidebar.subheader("Currency Display")
+currency_display_mode = st.sidebar.selectbox(
+    "Display Currency:",
+    ["USD Only", "EUR Only"],
+    help="Choose how to display costs in the results"
+)
 
 
 # --- Initialize DataFrames BEFORE loading ---
@@ -455,6 +693,14 @@ if calculation_ready and st.sidebar.button("Calculate Costs"):
         # Calculate the final cost per box including the rebate
         final_cost_per_box_usd = final_total_cost_usd / quantity_input if quantity_input > 0 else 0
 
+        # *** NEW: 13. PROFIT MARGIN CALCULATIONS ***
+        # Store profit analysis data
+        st.session_state['profit_analysis'] = {
+            'final_cost_per_box_usd': final_cost_per_box_usd,
+            'cogs_per_box_usd': cogs_per_box_usd,
+            'delivered_cost_per_box_usd': delivered_cost_per_box_usd
+        }
+
         # --- STORE RESULTS IN SESSION STATE ---
         # Store values needed potentially by other pages (like Batch Sales, Profit Calc)
         st.session_state['last_calc_product'] = selected_product_str
@@ -472,17 +718,17 @@ if calculation_ready and st.sidebar.button("Calculate Costs"):
 
         # Update summary data dictionary to include rebate and final total
         summary_data = {
-            "1. Raw Product": total_raw_cost_usd,
-            "2. Variable Costs (incl. Pallets)": total_variable_costs_incl_pallets_usd,
-            f"3. Fixed Costs {fixed_cost_label_suffix}": total_allocated_fixed_cost_usd,
-            f"   (Calc. Interest @ {INTEREST_RATE:.1%})": interest_cost_usd if interest_cost_usd > 0 else None, # Show only if non-zero
-            "   Subtotal COGS": total_cogs_usd,
-            f"4. {selected_shipment_type} Freight/Fee": freight_or_fixed_logistics_cost,
-            "   Subtotal Logistics": total_logistics_cost_usd,
-            "5. Unexpected Costs": total_unexpected_cost_usd,
-            "      Delivered Cost (Before Rebate)": total_delivered_cost_usd, # Show pre-rebate subtotal
-            f"6. Rebate/Fee ({rebate_percentage:.1f}%)": rebate_amount_usd,   # Show rebate amount
-            "Grand Total Cost (incl Rebate)": final_total_cost_usd        # Show final total with rebate
+            "1. Raw Product": format_cost_by_mode(total_raw_cost_usd, currency_display_mode),
+            "2. Variable Costs (incl. Pallets)": format_cost_by_mode(total_variable_costs_incl_pallets_usd, currency_display_mode),
+            f"3. Fixed Costs {fixed_cost_label_suffix}": format_cost_by_mode(total_allocated_fixed_cost_usd, currency_display_mode),
+            f"   (Calc. Interest @ {INTEREST_RATE:.1%})": format_cost_by_mode(interest_cost_usd, currency_display_mode) if interest_cost_usd > 0 else None, # Show only if non-zero
+            "   Subtotal COGS": format_cost_by_mode(total_cogs_usd, currency_display_mode),
+            f"4. {selected_shipment_type} Freight/Fee": format_cost_by_mode(freight_or_fixed_logistics_cost, currency_display_mode),
+            "   Subtotal Logistics": format_cost_by_mode(total_logistics_cost_usd, currency_display_mode),
+            "5. Unexpected Costs": format_cost_by_mode(total_unexpected_cost_usd, currency_display_mode),
+            "      Delivered Cost (Before Rebate)": format_cost_by_mode(total_delivered_cost_usd, currency_display_mode), # Show pre-rebate subtotal
+            f"6. Rebate/Fee ({rebate_percentage:.1f}%)": format_cost_by_mode(rebate_amount_usd, currency_display_mode),   # Show rebate amount
+            "Grand Total Cost (incl Rebate)": format_cost_by_mode(final_total_cost_usd, currency_display_mode)        # Show final total with rebate
         }
         # Remove None values from summary (like zero interest) for cleaner display
         st.session_state['summary_data'] = {k: v for k, v in summary_data.items() if v is not None}
@@ -533,49 +779,50 @@ if calculation_ready and st.sidebar.button("Calculate Costs"):
 
         st.markdown("---")
         # Renamed Delivered Cost tab
-        tab_cogs, tab_logistics, tab_total, tab_summary = st.tabs([
+        tab_cogs, tab_logistics, tab_total, tab_summary, tab_profit = st.tabs([
             "💰 COGS",
             f"🚚 Logistics ({selected_shipment_type})",
             "📦 Delivered Cost (+Rebate)", # Renamed
-            "📊 Batch Summary Detail"
+            "📊 Batch Summary Detail",
+            "📈 Profit Analysis"
         ])
 
         # --- COGS Tab ---
         # ... (remains the same) ...
         with tab_cogs:
             st.subheader(f"Cost of Goods Sold {fixed_cost_label_suffix}")
-            col1a, col1b = st.columns(2); col1a.metric("Total COGS", f"${total_cogs_usd:,.2f}"); col1b.metric("COGS / Box", f"${cogs_per_box_usd:,.2f}"); col1b.metric("COGS / KG (Net)", f"${cogs_per_kg_usd:,.2f}")
-            st.subheader("COGS Components (Total)"); col2a, col2b, col2c = st.columns(3); col2a.metric("Raw Product", f"${total_raw_cost_usd:,.2f}"); col2b.metric("Variable (incl. Pallets)", f"${total_variable_costs_incl_pallets_usd:,.2f}", help=f"Only included if checkbox is checked. Pallet cost always included."); col2c.metric(f"Fixed Costs {fixed_cost_label_suffix}", f"${total_allocated_fixed_cost_usd:,.2f}", help=f"Includes Calc. Interest: ${interest_cost_usd:,.2f}" if interest_cost_usd > 0 else None)
-            st.subheader("COGS Breakdown (Per Box)"); st.write(f"- Raw Product: ${raw_cost_per_box_usd:,.3f}"); st.write(f"- Variable (incl. Pallets): ${variable_costs_incl_pallets_per_box_usd:,.3f}"); st.caption(f"  (Components: ${total_per_unit_variable_comp_cost_usd:,.3f} + Pallets: ${pallet_cost_per_box_usd:,.3f})"); st.write(f"- Fixed Costs {fixed_cost_label_suffix}: ${fixed_cost_per_unit_usd:,.3f}"); st.write(f"**= Total COGS Per Box:** ${cogs_per_box_usd:,.3f}")
+            col1a, col1b = st.columns(2); col1a.metric("Total COGS", format_cost_by_mode(total_cogs_usd, currency_display_mode)); col1b.metric("COGS / Box", format_cost_by_mode(cogs_per_box_usd, currency_display_mode)); col1b.metric("COGS / KG (Net)", format_cost_by_mode(cogs_per_kg_usd, currency_display_mode))
+            st.subheader("COGS Components (Total)"); col2a, col2b, col2c = st.columns(3); col2a.metric("Raw Product", format_cost_by_mode(total_raw_cost_usd, currency_display_mode)); col2b.metric("Variable (incl. Pallets)", format_cost_by_mode(total_variable_costs_incl_pallets_usd, currency_display_mode), help=f"Only included if checkbox is checked. Pallet cost always included."); col2c.metric(f"Fixed Costs {fixed_cost_label_suffix}", format_cost_by_mode(total_allocated_fixed_cost_usd, currency_display_mode), help=f"Includes Calc. Interest: {format_cost_by_mode(interest_cost_usd, currency_display_mode)}" if interest_cost_usd > 0 else None)
+            st.subheader("COGS Breakdown (Per Box)"); st.write(f"- Raw Product: {format_cost_by_mode(raw_cost_per_box_usd, currency_display_mode)}"); st.write(f"- Variable (incl. Pallets): {format_cost_by_mode(variable_costs_incl_pallets_per_box_usd, currency_display_mode)}"); st.caption(f"  (Components: {format_cost_by_mode(total_per_unit_variable_comp_cost_usd, currency_display_mode)} + Pallets: {format_cost_by_mode(pallet_cost_per_box_usd, currency_display_mode)})"); st.write(f"- Fixed Costs {fixed_cost_label_suffix}: {format_cost_by_mode(fixed_cost_per_unit_usd, currency_display_mode)}"); st.write(f"**= Total COGS Per Box:** {format_cost_by_mode(cogs_per_box_usd, currency_display_mode)}")
 
         # --- Logistics Tab ---
         # ... (remains the same) ...
         with tab_logistics:
-            st.subheader(f"{selected_shipment_type} Logistics Cost ({logistics_cost_source})"); col3a, col3b = st.columns(2); col3a.metric("Total Logistics Cost", f"${total_logistics_cost_usd:,.2f}"); col3b.metric("Logistics / Box", f"${logistics_per_box_usd:,.2f}");
-            if final_shipping_gross_weight_kg > 0: col3b.metric("Logistics / KG (Gross Ship Wt)", f"${logistics_per_kg_gross_usd:,.3f}")
+            st.subheader(f"{selected_shipment_type} Logistics Cost ({logistics_cost_source})"); col3a, col3b = st.columns(2); col3a.metric("Total Logistics Cost", format_cost_by_mode(total_logistics_cost_usd, currency_display_mode)); col3b.metric("Logistics / Box", format_cost_by_mode(logistics_per_box_usd, currency_display_mode));
+            if final_shipping_gross_weight_kg > 0: col3b.metric("Logistics / KG (Gross Ship Wt)", format_cost_by_mode(logistics_per_kg_gross_usd, currency_display_mode))
             st.subheader("Logistics Components (Total)");
-            if selected_shipment_type == "Air": col4a, col4b = st.columns(2); freight_cost = final_shipping_gross_weight_kg * logistics_rate_per_kg; col4a.metric("Freight Cost", f"${freight_cost:,.2f}", f"{final_shipping_gross_weight_kg:.2f}kg @ ${logistics_rate_per_kg:.2f}/kg"); col4b.metric("Airway Bill Cost", f"${awb_cost:,.2f}")
-            elif selected_shipment_type in ["Container", "Truck"]: st.metric(f"{selected_shipment_type} Fixed Price", f"${fixed_logistics_price:,.2f}")
+            if selected_shipment_type == "Air": col4a, col4b = st.columns(2); freight_cost = final_shipping_gross_weight_kg * logistics_rate_per_kg; col4a.metric("Freight Cost", format_cost_by_mode(freight_cost, currency_display_mode), f"{final_shipping_gross_weight_kg:.2f}kg @ {format_cost_by_mode(logistics_rate_per_kg, currency_display_mode)}/kg"); col4b.metric("Airway Bill Cost", format_cost_by_mode(awb_cost, currency_display_mode))
+            elif selected_shipment_type in ["Container", "Truck"]: st.metric(f"{selected_shipment_type} Fixed Price", format_cost_by_mode(fixed_logistics_price, currency_display_mode))
             else: st.write("N/A")
 
         # --- Total Delivered Cost Tab (Modified for Rebate) ---
         with tab_total:
             st.subheader("Total Delivered Cost (COGS + Logistics + Unexpected + Rebate)") # Updated title
             # Show costs *before* rebate first
-            st.metric("Total Delivered Cost (Before Rebate)", f"${total_delivered_cost_usd:,.2f}")
-            st.write(f"*Calculation: ${total_cogs_usd:,.2f} (COGS) + ${total_logistics_cost_usd:,.2f} (Logistics) + ${total_unexpected_cost_usd:,.2f} (Unexpected)*")
+            st.metric("Total Delivered Cost (Before Rebate)", format_cost_by_mode(total_delivered_cost_usd, currency_display_mode))
+            st.write(f"*Calculation: {format_cost_by_mode(total_cogs_usd, currency_display_mode)} (COGS) + {format_cost_by_mode(total_logistics_cost_usd, currency_display_mode)} (Logistics) + {format_cost_by_mode(total_unexpected_cost_usd, currency_display_mode)} (Unexpected)*")
             st.markdown("---")
             # Show rebate calculation
             st.subheader(f"Retailer Rebate/Fee Adjustment ({rebate_percentage:.1f}%)")
             col_rebate1, col_rebate2 = st.columns(2)
-            col_rebate1.metric("Rebate/Fee Amount (Total Batch)", f"${rebate_amount_usd:,.2f}")
+            col_rebate1.metric("Rebate/Fee Amount (Total Batch)", format_cost_by_mode(rebate_amount_usd, currency_display_mode))
             # Show final costs *after* rebate
-            col_rebate2.metric("Final Total Cost (Incl. Rebate)", f"${final_total_cost_usd:,.2f}")
-            col_rebate2.metric("Final Cost / Box (Incl. Rebate)", f"${final_cost_per_box_usd:,.2f}")
+            col_rebate2.metric("Final Total Cost (Incl. Rebate)", format_cost_by_mode(final_total_cost_usd, currency_display_mode))
+            col_rebate2.metric("Final Cost / Box (Incl. Rebate)", format_cost_by_mode(final_cost_per_box_usd, currency_display_mode))
             if total_net_weight_kg > 0:
                  final_cost_per_kg_net_usd = final_total_cost_usd / total_net_weight_kg
-                 col_rebate2.metric("Final Cost / KG Net (Incl. Rebate)", f"${final_cost_per_kg_net_usd:,.2f}")
-            st.write(f"*Final Calculation: ${total_delivered_cost_usd:,.2f} (Delivered Cost) + ${rebate_amount_usd:,.2f} (Rebate)*")
+                 col_rebate2.metric("Final Cost / KG Net (Incl. Rebate)", format_cost_by_mode(final_cost_per_kg_net_usd, currency_display_mode))
+            st.write(f"*Final Calculation: {format_cost_by_mode(total_delivered_cost_usd, currency_display_mode)} (Delivered Cost) + {format_cost_by_mode(rebate_amount_usd, currency_display_mode)} (Rebate)*")
 
 
         # --- Batch Summary Detail Tab (Modified for Rebate) ---
@@ -585,11 +832,11 @@ if calculation_ready and st.sidebar.button("Calculate Costs"):
             if summary_data_dict:
                 # Pie Chart: Shows breakdown BEFORE rebate for clarity on operational costs
                 plot_data = {
-                    'Raw Product': summary_data_dict.get("1. Raw Product", 0),
-                    'Variable (incl. Pallets)': summary_data_dict.get("2. Variable Costs (incl. Pallets)", 0),
-                    'Fixed Costs': summary_data_dict.get(f"3. Fixed Costs {fixed_cost_label_suffix}", 0),
-                    'Freight/Fee': summary_data_dict.get(f"4. {selected_shipment_type} Freight/Fee", 0),
-                    'Unexpected': summary_data_dict.get("5. Unexpected Costs", 0)
+                    'Raw Product': total_raw_cost_usd,
+                    'Variable (incl. Pallets)': total_variable_costs_incl_pallets_usd,
+                    'Fixed Costs': total_allocated_fixed_cost_usd,
+                    'Freight/Fee': freight_or_fixed_logistics_cost,
+                    'Unexpected': total_unexpected_cost_usd
                 }
                 plot_data_filtered = {k: v for k, v in plot_data.items() if v > 0}
                 if plot_data_filtered:
@@ -603,10 +850,77 @@ if calculation_ready and st.sidebar.button("Calculate Costs"):
 
                 # Summary Table: Shows the FULL breakdown including rebate and final total
                 st.subheader("Full Cost Breakdown Table")
-                summary_df = pd.DataFrame(list(summary_data_dict.items()), columns=["Cost Category", "Total Cost (USD)"])
-                st.dataframe(summary_df.style.format({"Total Cost (USD)": "${:,.2f}"}), use_container_width=True)
+                summary_df = pd.DataFrame(list(summary_data_dict.items()), columns=["Cost Category", "Total Cost (USD/EUR)"])
+                st.dataframe(summary_df, use_container_width=True)
             else: st.write("Summary data not available (Run calculation first).")
 
+
+        # --- Profit Analysis Tab ---
+        with tab_profit:
+            st.subheader("Profit Margin Analysis")
+            
+            # Get stored profit analysis data
+            profit_data = st.session_state.get('profit_analysis', {})
+            if profit_data:
+                final_cost_per_box = profit_data.get('final_cost_per_box_usd', 0)
+                cogs_per_box = profit_data.get('cogs_per_box_usd', 0)
+                delivered_cost_per_box = profit_data.get('delivered_cost_per_box_usd', 0)
+                
+                # Display current costs
+                col_cost1, col_cost2, col_cost3 = st.columns(3)
+                col_cost1.metric("COGS per Box", format_cost_by_mode(cogs_per_box, currency_display_mode))
+                col_cost2.metric("Delivered Cost per Box", format_cost_by_mode(delivered_cost_per_box, currency_display_mode))
+                col_cost3.metric("Final Cost per Box (incl. Rebate)", format_cost_by_mode(final_cost_per_box, currency_display_mode))
+                
+                st.markdown("---")
+                
+                # Interactive Profit Calculator
+                st.subheader("Profit Calculator")
+                sales_price_input = st.number_input(
+                    "Enter Sales Price per Box (USD):",
+                    min_value=0.0,
+                    value=final_cost_per_box * 1.2,  # Default 20% markup
+                    step=0.01,
+                    format="%.2f"
+                )
+                
+                if sales_price_input > 0:
+                    # Calculate profit margins
+                    profit_analysis = calculate_profit_margins(final_cost_per_box, sales_price_input)
+                    
+                    col_profit1, col_profit2, col_profit3 = st.columns(3)
+                    col_profit1.metric("Profit per Box", format_cost_by_mode(profit_analysis['profit_per_box'], currency_display_mode))
+                    col_profit2.metric("Profit Margin", f"{profit_analysis['profit_margin_percent']:.1f}%")
+                    col_profit3.metric("ROI", f"{profit_analysis['roi_percent']:.1f}%")
+                    
+                    # Total profit for batch
+                    total_profit = profit_analysis['profit_per_box'] * quantity_input
+                    st.metric("Total Profit for Batch", format_cost_by_mode(total_profit, currency_display_mode))
+                    
+                    # Cost Sensitivity Analysis
+                    st.markdown("---")
+                    st.subheader("Cost Sensitivity Analysis")
+                    
+                    # Create sensitivity table
+                    markup_percentages = [5, 10, 15, 20, 25, 30, 40, 50]
+                    sensitivity_data = []
+                    
+                    for markup in markup_percentages:
+                        sales_price = final_cost_per_box * (1 + markup / 100)
+                        analysis = calculate_profit_margins(final_cost_per_box, sales_price)
+                        sensitivity_data.append({
+                            "Markup %": markup,
+                            "Sales Price": format_cost_by_mode(sales_price, currency_display_mode),
+                            "Profit per Box": format_cost_by_mode(analysis['profit_per_box'], currency_display_mode),
+                            "Profit Margin %": f"{analysis['profit_margin_percent']:.1f}%",
+                            "ROI %": f"{analysis['roi_percent']:.1f}%"
+                        })
+                    
+                    sensitivity_df = pd.DataFrame(sensitivity_data)
+                    st.dataframe(sensitivity_df, use_container_width=True)
+                    
+            else:
+                st.info("Run a calculation first to see profit analysis.")
 
         # --- Optional Variable Breakdown ---
         with st.expander("Show Detailed Variable Cost & Weight Breakdown (Per Box) - Components Only"):
@@ -639,6 +953,105 @@ if calculation_ready and st.sidebar.button("Calculate Costs"):
                      st.caption("*Variable Component Costs were excluded from COGS calculation based on checkbox selection.*")
             else: st.write("(No variable components found in recipe or breakdown unavailable)")
 
+# --- Export Section ---
+st.markdown("---")
+st.subheader("📊 Export Results")
+
+if st.session_state.get('calculation_done', False):
+    # Get data for export
+    summary_data_dict = st.session_state.get('summary_data', {})
+    profit_data = st.session_state.get('profit_analysis', {})
+    calculation_details = {
+        'product': st.session_state.get('last_calc_product', 'N/A'),
+        'quantity': st.session_state.get('last_calc_quantity', 'N/A'),
+        'shipment_type': st.session_state.get('selected_shipment_type', 'N/A'),
+        'fixed_cost_mode': fixed_cost_mode if 'fixed_cost_mode' in locals() else 'N/A'
+    }
+    
+    # Create sensitivity data for export
+    sensitivity_data = []
+    if profit_data and 'final_cost_per_box_usd' in profit_data:
+        final_cost_per_box = profit_data['final_cost_per_box_usd']
+        markup_percentages = [5, 10, 15, 20, 25, 30, 40, 50]
+        for markup in markup_percentages:
+            sales_price = final_cost_per_box * (1 + markup / 100)
+            analysis = calculate_profit_margins(final_cost_per_box, sales_price)
+            sensitivity_data.append({
+                "Markup %": markup,
+                "Sales Price (USD)": f"${sales_price:,.2f}",
+                "Profit per Box (USD)": f"${analysis['profit_per_box']:,.2f}",
+                "Profit Margin %": f"{analysis['profit_margin_percent']:.1f}%",
+                "ROI %": f"{analysis['roi_percent']:.1f}%"
+            })
+    
+    col_export1, col_export2 = st.columns(2)
+    
+    with col_export1:
+        st.write("**Export as CSV:**")
+        csv_data = create_csv_export(summary_data_dict, profit_data, calculation_details)
+        csv_filename = f"cost_calculation_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        csv_link = get_download_link(csv_data, csv_filename, "csv")
+        st.markdown(csv_link, unsafe_allow_html=True)
+    
+    with col_export2:
+        st.write("**Export as Excel:**")
+        excel_data = create_excel_export(summary_data_dict, profit_data, calculation_details, sensitivity_data)
+        excel_filename = f"cost_calculation_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+        excel_link = get_download_link(excel_data, excel_filename, "excel")
+        st.markdown(excel_link, unsafe_allow_html=True)
+    
+    st.caption("💡 Export includes cost breakdown, profit analysis, and sensitivity analysis (Excel only)")
+else:
+    st.info("Run a calculation first to enable export options.")
+
+# --- UI Improvements and Advanced Features ---
+st.markdown("---")
+st.subheader("🎨 Advanced Features")
+
+# Cost History Tracking
+col_theme2 = st.columns(1)[0]
+with col_theme2:
+    st.write("**Cost History:**")
+    if st.button("💾 Save Current Calculation", help="Save this calculation to history"):
+        if st.session_state.get('calculation_done', False):
+            # Save calculation to session state history
+            if 'cost_history' not in st.session_state:
+                st.session_state['cost_history'] = []
+            
+            history_entry = {
+                'timestamp': datetime.now().isoformat(),
+                'product': st.session_state.get('last_calc_product', 'N/A'),
+                'quantity': st.session_state.get('last_calc_quantity', 'N/A'),
+                'final_cost_per_box': st.session_state.get('final_cost_per_box_usd', 0),
+                'shipment_type': st.session_state.get('selected_shipment_type', 'N/A'),
+                'fixed_cost_mode': fixed_cost_mode if 'fixed_cost_mode' in locals() else 'N/A'
+            }
+            st.session_state['cost_history'].append(history_entry)
+            st.success("Calculation saved to history!")
+
+# Display Cost History
+if 'cost_history' in st.session_state and st.session_state['cost_history']:
+    st.subheader("📈 Cost History")
+    history_df = pd.DataFrame(st.session_state['cost_history'])
+    history_df['timestamp'] = pd.to_datetime(history_df['timestamp']).dt.strftime('%Y-%m-%d %H:%M')
+    history_df['final_cost_per_box'] = history_df['final_cost_per_box'].apply(lambda x: format_cost_by_mode(x, currency_display_mode))
+    
+    # Rename columns for display
+    history_df = history_df.rename(columns={
+        'timestamp': 'Date/Time',
+        'product': 'Product',
+        'quantity': 'Quantity',
+        'final_cost_per_box': 'Cost per Box',
+        'shipment_type': 'Shipment',
+        'fixed_cost_mode': 'Fixed Cost Mode'
+    })
+    
+    st.dataframe(history_df, use_container_width=True)
+    
+    # Clear history button
+    if st.button("🗑️ Clear History"):
+        st.session_state['cost_history'] = []
+        st.rerun()
 
 # --- Input prompts if calculation isn't ready ---
 else:
