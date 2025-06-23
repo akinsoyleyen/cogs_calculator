@@ -383,6 +383,10 @@ try: # Load all data
     pallets_df = load_csv(PALLETS_CSV, ['PalletType', 'CostUSD', 'WeightKG'], ['CostUSD', 'WeightKG'])
     product_packing_df = load_csv(PACKING_CSV, ['ProductID', 'BoxesPerPallet'], ['BoxesPerPallet'], string_cols=['ProductID']) # Load packing data
 
+    # Explicitly convert BoxesPerPallet to numeric to avoid type issues
+    if product_packing_df is not None:
+        product_packing_df['BoxesPerPallet'] = pd.to_numeric(product_packing_df['BoxesPerPallet'], errors='coerce')
+
     if errors: raise ValueError("Errors occurred during file loading. See details above.")
 
     # Process data only if loading succeeded
@@ -508,7 +512,21 @@ if selected_shipment_type == "Air":
     else: selected_destination = st.sidebar.selectbox("Select Destination (Air):", ["Select..."] + air_destinations) # Add select prompt
 
 manual_logistics_cost_usd = 0.0
-if selected_shipment_type in ["Container", "Truck"]: manual_logistics_cost_usd = st.sidebar.number_input(f"Enter Fixed {selected_shipment_type} Price (USD):", min_value=0.0, value=4000.0, step=50.0, format="%.2f")
+if selected_shipment_type in ["Container", "Truck"]:
+    # Determine currency for display based on mode
+    logistics_currency = "EUR" if currency_display_mode == "EUR Only" else "USD"
+    manual_logistics_cost_input = st.sidebar.number_input(
+        f"Enter Fixed {selected_shipment_type} Price ({logistics_currency}):",
+        min_value=0.0,
+        value=4000.0,
+        step=50.0,
+        format="%.2f"
+    )
+    # Convert EUR to USD if needed
+    if currency_display_mode == "EUR Only":
+        manual_logistics_cost_usd = manual_logistics_cost_input / usd_to_eur_rate
+    else:
+        manual_logistics_cost_usd = manual_logistics_cost_input
 
 # *** NEW: Rebate Input ***
 st.sidebar.subheader("Sales Adjustments")
@@ -733,7 +751,7 @@ if calculation_ready and st.sidebar.button("Calculate Costs"):
         st.session_state['selected_shipment_type'] = selected_shipment_type
         st.session_state['final_cost_per_box_usd'] = final_cost_per_box_usd
         st.session_state['selected_pallet_type'] = selected_pallet_type
-        st.session_state['boxes_per_pallet'] = boxes_per_pallet
+        st.session_state['boxes_per_pallet'] = boxes_per_pallet if boxes_per_pallet > 0 else 1  # Always set, fallback to 1 if not valid
         st.session_state['weight_per_pallet_kg'] = weight_per_pallet_kg
         st.session_state['num_pallets'] = num_pallets
         # OVERWRITE THE CLEANED DICTIONARY WITH THE ORIGINAL ONE
@@ -793,7 +811,13 @@ if calculation_ready and st.sidebar.button("Calculate Costs"):
             if final_shipping_gross_weight_kg > 0: col3b.metric("Logistics / KG (Gross Ship Wt)", format_cost_by_mode(logistics_per_kg_gross_usd, currency_display_mode))
             st.subheader("Logistics Components (Total)");
             if selected_shipment_type == "Air": col4a, col4b = st.columns(2); freight_cost = final_shipping_gross_weight_kg * logistics_rate_per_kg; col4a.metric("Freight Cost", format_cost_by_mode(freight_cost, currency_display_mode), f"{final_shipping_gross_weight_kg:.2f}kg @ {format_cost_by_mode(logistics_rate_per_kg, currency_display_mode)}/kg"); col4b.metric("Airway Bill Cost", format_cost_by_mode(awb_cost, currency_display_mode))
-            elif selected_shipment_type in ["Container", "Truck"]: st.metric(f"{selected_shipment_type} Fixed Price", format_cost_by_mode(fixed_logistics_price, currency_display_mode))
+            elif selected_shipment_type in ["Container", "Truck"]:
+                # For Container/Truck, show the price in the selected currency
+                if currency_display_mode == "EUR Only":
+                    fixed_price_display = manual_logistics_cost_input
+                else:
+                    fixed_price_display = fixed_logistics_price
+                st.metric(f"{selected_shipment_type} Fixed Price", format_cost_by_mode(fixed_price_display, currency_display_mode))
             else: st.write("N/A")
 
         # --- Total Delivered Cost Tab (Modified for Rebate) ---
