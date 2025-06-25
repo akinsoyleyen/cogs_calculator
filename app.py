@@ -10,6 +10,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment
 import base64
 import numpy as np  # Add this import at the top for np.unique
+import plotly.graph_objects as go
 
 # --- Constants ---
 FALLBACK_TRY_TO_USD = 0.037  # Fallback rate if API fails
@@ -936,6 +937,14 @@ if calculation_ready and st.sidebar.button("Calculate Costs"):
                     
                     sensitivity_df = pd.DataFrame(sensitivity_data)
                     st.dataframe(sensitivity_df, use_container_width=True)
+
+                    # Add a graph for Cost Sensitivity Analysis
+                    fig = go.Figure()
+                    fig.add_trace(go.Scatter(x=sensitivity_df['Markup %'], y=sensitivity_df['Profit per Box'].apply(lambda x: float(x.replace('$','').replace(',','').replace('€',''))), mode='lines+markers', name='Profit per Box'))
+                    fig.add_trace(go.Scatter(x=sensitivity_df['Markup %'], y=sensitivity_df['Profit Margin %'].apply(lambda x: float(x.replace('%',''))), mode='lines+markers', name='Profit Margin %'))
+                    fig.add_trace(go.Scatter(x=sensitivity_df['Markup %'], y=sensitivity_df['ROI %'].apply(lambda x: float(x.replace('%',''))), mode='lines+markers', name='ROI %'))
+                    fig.update_layout(title='Cost Sensitivity Analysis', xaxis_title='Markup %', yaxis_title='Value', legend_title='Metric')
+                    st.plotly_chart(fig, use_container_width=True)
                     
             else:
                 st.info("Run a calculation first to see profit analysis.")
