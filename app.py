@@ -13,7 +13,7 @@ import base64
 # --- Constants ---
 FALLBACK_TRY_TO_USD = 0.037  # Fallback rate if API fails
 FALLBACK_USD_TO_EUR = 0.85   # Fallback USD to EUR rate if API fails
-INTEREST_RATE = 0.02  # 2% interest rate
+INTEREST_RATE = 0.05  # 5% interest rate
 INTEREST_COST_ITEM_NAME = "Calc. Interest"  # Name for calculated interest cost
 
 # --- API URLs ---
@@ -672,7 +672,7 @@ if calculation_ready and st.sidebar.button("Calculate Costs"):
             total_standard_fixed_cost_usd = standard_fixed_df['MonthlyCost_USD'].sum()
 
         # --- 9. Interest Cost (Based on sum of others) ---
-        # Interest is always calculated as 2% of the preceding costs, regardless of other settings.
+        # Interest is always calculated as 5% of the preceding costs, regardless of other settings.
         interest_base_cost = total_raw_cost_usd + total_variable_costs_incl_pallets_usd + total_standard_fixed_cost_usd + total_logistics_cost_usd + total_unexpected_cost_usd
         interest_cost_usd = interest_base_cost * INTEREST_RATE
 
@@ -729,7 +729,7 @@ if calculation_ready and st.sidebar.button("Calculate Costs"):
             "1. Raw Product": format_cost_by_mode(total_raw_cost_usd, currency_display_mode),
             "2. Variable Costs (incl. Pallets)": format_cost_by_mode(total_variable_costs_incl_pallets_usd, currency_display_mode),
             f"3. Fixed Costs {fixed_cost_label_suffix}": format_cost_by_mode(total_allocated_fixed_cost_usd, currency_display_mode),
-            f"   (Calc. Interest @ {INTEREST_RATE:.1%})": format_cost_by_mode(interest_cost_usd, currency_display_mode), # Always show, even if zero
+            f"   (Calc. Interest @ 5.0%)": format_cost_by_mode(interest_cost_usd, currency_display_mode), # Always show, even if zero
             "   Subtotal COGS": format_cost_by_mode(total_cogs_usd, currency_display_mode),
             f"4. {selected_shipment_type} Freight/Fee": format_cost_by_mode(freight_or_fixed_logistics_cost, currency_display_mode),
             "   Subtotal Logistics": format_cost_by_mode(total_logistics_cost_usd, currency_display_mode),
