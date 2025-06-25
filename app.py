@@ -9,6 +9,7 @@ import io
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment
 import base64
+import numpy as np  # Add this import at the top for np.unique
 
 # --- Constants ---
 FALLBACK_TRY_TO_USD = 0.037  # Fallback rate if API fails
@@ -158,7 +159,8 @@ def create_excel_export(summary_data_dict, profit_data, calculation_details, sen
     wb = Workbook()
     
     # Remove default sheet
-    wb.remove(wb.active)
+    if wb.active is not None:
+        wb.remove(wb.active)
     
     # Summary sheet
     ws_summary = wb.create_sheet("Cost Summary")
@@ -360,9 +362,9 @@ def load_csv(file_path, required_cols, numeric_cols=None, decimal_char='.', stri
                      rows_to_check_for_nan = has_nan
 
                 if rows_to_check_for_nan.any():
-                     # Identify specific rows with errors if possible (more helpful message)
-                     error_indices = df.index[rows_to_check_for_nan].tolist()
-                     raise ValueError(f"Column '{col}' in '{file_path}' contains non-numeric values or blanks at row indices (starting 0): {error_indices[:5]}...") # Show first few errors
+                    # Identify specific rows with errors if possible (more helpful message)
+                    error_indices = df.index[rows_to_check_for_nan].tolist()
+                    raise ValueError(f"Column '{col}' in '{file_path}' contains non-numeric values or blanks at row indices (starting 0): {error_indices[:5]}...") # Show first few errors
 
         if string_cols:
             for col in string_cols:
@@ -605,11 +607,12 @@ if calculation_ready and st.sidebar.button("Calculate Costs"):
                 on='ComponentName', how='left'
             )
             if product_variable_costs_detailed.isnull().values.any():
-                missing = product_variable_costs_detailed[product_variable_costs_detailed.isnull().any(axis=1)]['ComponentName'].unique().tolist()
+                missing = pd.Series(product_variable_costs_detailed[product_variable_costs_detailed.isnull().any(axis=1)]['ComponentName']).unique().tolist()
                 raise ValueError(f"Details missing after merge for component(s): {missing}. Check '{COMPONENTS_CSV}'.")
 
             product_variable_costs_detailed['QuantityPerProduct'] = pd.to_numeric(product_variable_costs_detailed['QuantityPerProduct'], errors='coerce')
-            if product_variable_costs_detailed['QuantityPerProduct'].isnull().any(): raise ValueError("Non-numeric 'QuantityPerProduct' found in recipe.")
+            if product_variable_costs_detailed['QuantityPerProduct'].isnull().any():
+                raise ValueError("Non-numeric 'QuantityPerProduct' found in recipe.")
 
             # Calculate Weight first
             product_variable_costs_detailed['LineItemWeightKG'] = product_variable_costs_detailed['WeightKG'] * product_variable_costs_detailed['QuantityPerProduct']
@@ -855,7 +858,7 @@ if calculation_ready and st.sidebar.button("Calculate Costs"):
                 }
                 plot_data_filtered = {k: v for k, v in plot_data.items() if v > 0}
                 if plot_data_filtered:
-                    plot_df = pd.DataFrame(list(plot_data_filtered.items()), columns=["Cost Category", "Total Cost (USD)"])
+                    plot_df = pd.DataFrame(list(plot_data_filtered.items()), columns=pd.Index(["Cost Category", "Total Cost (USD)"]))
                     fig = px.pie(plot_df, names='Cost Category', values='Total Cost (USD)',
                                  title='Cost Breakdown by Component (Before Rebate)', # Updated title
                                  hole=.3)
@@ -865,7 +868,7 @@ if calculation_ready and st.sidebar.button("Calculate Costs"):
 
                 # Summary Table: Shows the FULL breakdown including rebate and final total
                 st.subheader("Full Cost Breakdown Table")
-                summary_df = pd.DataFrame(list(summary_data_dict.items()), columns=["Cost Category", "Total Cost (USD/EUR)"])
+                summary_df = pd.DataFrame(list(summary_data_dict.items()), columns=pd.Index(["Cost Category", "Total Cost (USD/EUR)"]))
                 st.dataframe(summary_df, use_container_width=True)
             else: st.write("Summary data not available (Run calculation first).")
 
