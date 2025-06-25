@@ -140,8 +140,10 @@ if profit_markup_percentage is not None:
             
             # Apply formatting only to numeric columns
             numeric_columns = results_df_air.select_dtypes(include=["number"]).columns
+            # Remove 'Boxes per Pallet' from currency formatting if present
+            currency_columns = [col for col in numeric_columns if col != 'Boxes per Pallet']
             styled_df = results_df_air.style.format(
-                {col: "${:,.2f}" for col in numeric_columns}, na_rep="-"
+                {col: "${:,.2f}" for col in currency_columns}, na_rep="-"
             )
             
             # Display the styled DataFrame
@@ -198,7 +200,7 @@ else:
 st.markdown("---")
 st.subheader("Cost Summary Used (Total Batch Costs from Main Calculator run)")
 if summary_data:
-    summary_df = pd.DataFrame(list(summary_data.items()), columns=['Cost Category', 'Total Cost (USD)'])
+    summary_df = pd.DataFrame(list(summary_data.items()), columns=pd.Index(['Cost Category', 'Total Cost (USD)']))
     
     # Display without additional formatting since the data comes pre-formatted from main app
     st.dataframe(summary_df, use_container_width=True)
