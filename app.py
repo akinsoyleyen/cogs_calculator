@@ -670,24 +670,19 @@ if calculation_ready and st.sidebar.button("Calculate Costs"):
         # --- 8. Fixed Costs (10% Option Calculated Here, after Logistics) ---
         if fixed_cost_mode == "percent":
             total_value_for_percent = total_raw_cost_usd + total_variable_costs_incl_pallets_usd + total_logistics_cost_usd + total_unexpected_cost_usd
-            total_standard_fixed_cost_usd = total_value_for_percent * 0.10
+            fixed_cost_10_percent = total_value_for_percent * 0.10
+            # Interest is always calculated as 5% of (raw + variable + logistics + unexpected + fixed cost)
+            interest_base_cost = total_value_for_percent + fixed_cost_10_percent
+            interest_cost_usd = interest_base_cost * INTEREST_RATE
+            total_allocated_fixed_cost_usd = fixed_cost_10_percent  # Only the 10% value, do not add interest here
         else:
             standard_fixed_df = fixed_df[ (fixed_df['CostItem'].str.strip().str.lower() != INTEREST_COST_ITEM_NAME.lower()) & (fixed_df['Category'].isin(fixed_categories_to_include)) ]
             total_standard_fixed_cost_usd = standard_fixed_df['MonthlyCost_USD'].sum()
-
-        # --- 9. Interest Cost (Based on sum of others) ---
-        # Interest is always calculated as 5% of the preceding costs, regardless of other settings.
-        interest_base_cost = total_raw_cost_usd + total_variable_costs_incl_pallets_usd + total_standard_fixed_cost_usd + total_logistics_cost_usd + total_unexpected_cost_usd
-        interest_cost_usd = interest_base_cost * INTEREST_RATE
-
-        # --- 10. FINAL Fixed Costs & COGS ---
-        # ... (logic remains the same) ...
-        if fixed_cost_mode == "percent":
-            total_allocated_fixed_cost_usd = total_standard_fixed_cost_usd + interest_cost_usd  # Always include interest
-        else:
-            total_allocated_fixed_cost_usd = total_standard_fixed_cost_usd + interest_cost_usd
+            interest_base_cost = total_raw_cost_usd + total_variable_costs_incl_pallets_usd + total_standard_fixed_cost_usd + total_logistics_cost_usd + total_unexpected_cost_usd
+            interest_cost_usd = interest_base_cost * INTEREST_RATE
+            total_allocated_fixed_cost_usd = total_standard_fixed_cost_usd
         fixed_cost_per_unit_usd = total_allocated_fixed_cost_usd / quantity_input if quantity_input > 0 else 0
-        total_cogs_usd = total_raw_cost_usd + total_variable_costs_incl_pallets_usd + total_allocated_fixed_cost_usd
+        total_cogs_usd = total_raw_cost_usd + total_variable_costs_incl_pallets_usd + total_allocated_fixed_cost_usd + interest_cost_usd
         cogs_per_box_usd = total_cogs_usd / quantity_input if quantity_input > 0 else 0; total_net_weight_kg = net_weight_kg * quantity_input; cogs_per_kg_usd = total_cogs_usd / total_net_weight_kg if total_net_weight_kg > 0 else 0
 
         # --- 11. Total Delivered Cost (Before Rebate) ---
@@ -732,15 +727,15 @@ if calculation_ready and st.sidebar.button("Calculate Costs"):
         summary_data = {
             "1. Raw Product": format_cost_by_mode(total_raw_cost_usd, currency_display_mode),
             "2. Variable Costs (incl. Pallets)": format_cost_by_mode(total_variable_costs_incl_pallets_usd, currency_display_mode),
-            f"3. Fixed Costs {fixed_cost_label_suffix}": format_cost_by_mode(total_allocated_fixed_cost_usd, currency_display_mode),
-            f"   (Calc. Interest @ 5.0%)": format_cost_by_mode(interest_cost_usd, currency_display_mode), # Always show, even if zero
+            f"3. Fixed Costs {fixed_cost_label_suffix}": format_cost_by_mode(fixed_cost_10_percent, currency_display_mode),
+            f"   (Calc. Interest @ 5.0%)": format_cost_by_mode(interest_cost_usd, currency_display_mode),
             "   Subtotal COGS": format_cost_by_mode(total_cogs_usd, currency_display_mode),
             f"4. {selected_shipment_type} Freight/Fee": format_cost_by_mode(freight_or_fixed_logistics_cost, currency_display_mode),
             "   Subtotal Logistics": format_cost_by_mode(total_logistics_cost_usd, currency_display_mode),
             "5. Unexpected Costs": format_cost_by_mode(total_unexpected_cost_usd, currency_display_mode),
-            "      Delivered Cost (Before Rebate)": format_cost_by_mode(total_delivered_cost_usd, currency_display_mode), # Show pre-rebate subtotal
-            f"6. Rebate/Fee ({rebate_percentage:.1f}%)": format_cost_by_mode(rebate_amount_usd, currency_display_mode),   # Show rebate amount
-            "Grand Total Cost (incl Rebate)": format_cost_by_mode(final_total_cost_usd, currency_display_mode)        # Show final total with rebate
+            "      Delivered Cost (Before Rebate)": format_cost_by_mode(total_delivered_cost_usd, currency_display_mode),
+            f"6. Rebate/Fee ({rebate_percentage:.1f}%)": format_cost_by_mode(rebate_amount_usd, currency_display_mode),
+            "Grand Total Cost (incl Rebate)": format_cost_by_mode(final_total_cost_usd, currency_display_mode)
         }
         # Remove None values from summary (like zero interest) for cleaner display
         st.session_state['summary_data'] = {k: v for k, v in summary_data.items() if v is not None}
