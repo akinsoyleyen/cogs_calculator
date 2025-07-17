@@ -676,11 +676,8 @@ if calculation_ready and st.sidebar.button("Calculate Costs"):
             interest_cost_usd = interest_base_cost * INTEREST_RATE
             total_allocated_fixed_cost_usd = fixed_cost_10_percent  # Only the 10% value, do not add interest here
         else:
-            st.write("DEBUG: fixed_cost_selection =", fixed_cost_selection)
-            st.write("DEBUG: fixed_categories_to_include =", fixed_categories_to_include)
+            # Remove debug output for production
             standard_fixed_df = fixed_df[ (fixed_df['CostItem'].str.strip().str.lower() != INTEREST_COST_ITEM_NAME.lower()) & (fixed_df['Category'].isin(fixed_categories_to_include)) ]
-            st.write("DEBUG: Fixed costs included for this mode:")
-            st.dataframe(standard_fixed_df)
             total_standard_fixed_cost_usd = standard_fixed_df['MonthlyCost_USD'].sum()
             interest_base_cost = total_raw_cost_usd + total_variable_costs_incl_pallets_usd + total_standard_fixed_cost_usd + total_logistics_cost_usd + total_unexpected_cost_usd
             interest_cost_usd = interest_base_cost * INTEREST_RATE
