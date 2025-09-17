@@ -6,7 +6,7 @@ Clamshell 500G V72,Clamshell,2.05,0.03
 40x60x10,Box,26,0.47
 Clamshell 350G,Clamshell,1.35,0.025
 40x60x22,Box,39,0.81
-40x60x23.5,Box,39,0.78
+40x60x23.5,Box,39,0.81
 Watermelon 360kg Wooden Bin,Box,840,35
 Watermelon 360kg Carton Bin,Box,1100,35
 Label Generic,Label,0.2,0
@@ -15,4 +15,5 @@ Label Generic,Label,0.2,0
 20x30x7,Box,10,0.11
 30x40x7,Box,14,0.18
 Telescopic 15kg,Box,55,0.9
+40x60x16,Box,39,0.75
 
