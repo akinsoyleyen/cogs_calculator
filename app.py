@@ -668,20 +668,26 @@ if calculation_ready and st.sidebar.button("Calculate Costs"):
         unexpected_cost_per_box_usd = total_unexpected_cost_usd / quantity_input if quantity_input > 0 else 0
 
         # --- 8. Fixed Costs (10% Option Calculated Here, after Logistics) ---
+        interest_base_cost = 0.0
         if fixed_cost_mode == "percent":
             total_value_for_percent = total_raw_cost_usd + total_variable_costs_incl_pallets_usd + total_logistics_cost_usd + total_unexpected_cost_usd
             fixed_cost_10_percent = total_value_for_percent * 0.10
-            # Interest is always calculated as 5% of (raw + variable + logistics + unexpected + fixed cost)
-            interest_base_cost = total_value_for_percent + fixed_cost_10_percent
-            interest_cost_usd = interest_base_cost * INTEREST_RATE
             total_allocated_fixed_cost_usd = fixed_cost_10_percent  # Only the 10% value, do not add interest here
         else:
             # Remove debug output for production
             standard_fixed_df = fixed_df[ (fixed_df['CostItem'].str.strip().str.lower() != INTEREST_COST_ITEM_NAME.lower()) & (fixed_df['Category'].isin(fixed_categories_to_include)) ]
             total_standard_fixed_cost_usd = standard_fixed_df['MonthlyCost_USD'].sum()
-            interest_base_cost = total_raw_cost_usd + total_variable_costs_incl_pallets_usd + total_standard_fixed_cost_usd + total_logistics_cost_usd + total_unexpected_cost_usd
-            interest_cost_usd = interest_base_cost * INTEREST_RATE
             total_allocated_fixed_cost_usd = total_standard_fixed_cost_usd
+
+        # Interest should account for the entire amount we pre-finance (raw, variable, fixed, logistics, unexpected)
+        interest_base_cost = (
+            total_raw_cost_usd
+            + total_variable_costs_incl_pallets_usd
+            + total_allocated_fixed_cost_usd
+            + total_logistics_cost_usd
+            + total_unexpected_cost_usd
+        )
+        interest_cost_usd = interest_base_cost * INTEREST_RATE
         fixed_cost_per_unit_usd = total_allocated_fixed_cost_usd / quantity_input if quantity_input > 0 else 0
         total_cogs_usd = total_raw_cost_usd + total_variable_costs_incl_pallets_usd + total_allocated_fixed_cost_usd + interest_cost_usd
         cogs_per_box_usd = total_cogs_usd / quantity_input if quantity_input > 0 else 0; total_net_weight_kg = net_weight_kg * quantity_input; cogs_per_kg_usd = total_cogs_usd / total_net_weight_kg if total_net_weight_kg > 0 else 0
