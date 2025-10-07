@@ -13,7 +13,7 @@ import numpy as np  # Add this import at the top for np.unique
 import plotly.graph_objects as go
 
 # --- Constants ---
-FALLBACK_TRY_TO_USD = 0.037  # Fallback rate if API fails
+FALLBACK_TRY_TO_USD = 0.025  # Fallback rate if API fails
 FALLBACK_USD_TO_EUR = 0.85   # Fallback USD to EUR rate if API fails
 INTEREST_RATE = 0.05  # 5% interest rate
 INTEREST_COST_ITEM_NAME = "Calc. Interest"  # Name for calculated interest cost
