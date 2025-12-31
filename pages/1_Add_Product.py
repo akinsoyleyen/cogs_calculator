@@ -31,6 +31,7 @@ packing_df = load_csv_or_stop(PACKING_CSV, ["ProductID", "BoxesPerPallet"])
 
 component_options = sorted(components_df["ComponentName"].astype(str).str.strip().unique().tolist())
 existing_products = set(weights_df["ProductID"].astype(str).str.strip().tolist())
+existing_components = set(components_df["ComponentName"].astype(str).str.strip().tolist())
 
 if not component_options:
     st.error("No components found in `components.csv`. Add components first.")
@@ -130,3 +131,49 @@ if submitted:
         st.dataframe(recipe_rows.reset_index(drop=True), use_container_width=True)
     except Exception as e:
         st.error(f"Failed to write CSVs: {e}")
+
+st.divider()
+st.subheader("Add Component")
+
+with st.form("add_component_form"):
+    component_name = st.text_input("Component name", placeholder="e.g., 40x60x9")
+    component_type = st.text_input("Component type", placeholder="e.g., Box")
+    cost_per_unit = st.number_input("Cost per unit", min_value=0.0, step=0.01, format="%.4f")
+    weight_kg = st.number_input("Weight (kg)", min_value=0.0, step=0.01, format="%.4f")
+    component_submitted = st.form_submit_button("Add component")
+
+if component_submitted:
+    name_clean = component_name.strip()
+    type_clean = component_type.strip()
+    errors = []
+
+    if not name_clean:
+        errors.append("Component name is required.")
+    if not type_clean:
+        errors.append("Component type is required.")
+    if name_clean in existing_components:
+        errors.append(f"Component '{name_clean}' already exists in `{COMPONENTS_CSV}`.")
+
+    if errors:
+        for err in errors:
+            st.error(err)
+        st.stop()
+
+    new_component_row = pd.DataFrame(
+        [
+            {
+                "ComponentName": name_clean,
+                "ComponentType": type_clean,
+                "CostPerUnit": float(cost_per_unit),
+                "WeightKG": float(weight_kg),
+            }
+        ]
+    )
+    components_out = pd.concat([components_df, new_component_row], ignore_index=True)
+
+    try:
+        components_out.to_csv(COMPONENTS_CSV, index=False)
+        st.success(f"Added '{name_clean}' to `{COMPONENTS_CSV}`.")
+        st.dataframe(new_component_row, use_container_width=True)
+    except Exception as e:
+        st.error(f"Failed to write `{COMPONENTS_CSV}`: {e}")
