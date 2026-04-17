@@ -39,10 +39,8 @@ st.set_page_config(layout="wide", page_title="Ledger — Cost & Logistics", page
 
 # --- Inject styling (fonts, palette, typography) ---
 CUSTOM_CSS = """
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wdth,wght@12..96,75..100,400..700&family=Public+Sans:ital,wght@0,300..700;1,400&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
+@import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wdth,wght@12..96,75..100,400..700&family=Public+Sans:ital,wght@0,300..700;1,400&family=JetBrains+Mono:wght@400;500;600&display=swap');
 :root {
   --ink: oklch(0.22 0.012 80);
   --ink-soft: oklch(0.38 0.012 80);
@@ -324,7 +322,10 @@ a:hover { background: var(--olive-wash); color: var(--ink); }
 }
 </style>
 """
-st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
+if hasattr(st, "html"):
+    st.html(CUSTOM_CSS)
+else:
+    st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
 # --- Sidebar masthead ---
 with st.sidebar:

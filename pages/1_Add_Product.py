@@ -12,10 +12,8 @@ st.set_page_config(page_title="Add Product — Ledger", layout="wide", page_icon
 
 # Reuse the same editorial styling as the main app
 _SHARED_CSS = """
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wdth,wght@12..96,75..100,400..700&family=Public+Sans:ital,wght@0,300..700;1,400&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
+@import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wdth,wght@12..96,75..100,400..700&family=Public+Sans:ital,wght@0,300..700;1,400&family=JetBrains+Mono:wght@400;500;600&display=swap');
 :root {
   --ink: oklch(0.22 0.012 80);
   --ink-soft: oklch(0.38 0.012 80);
@@ -62,7 +60,10 @@ input, textarea, [data-baseweb="input"] input { font-family: "Public Sans", sans
 [data-testid="stAlert"][kind="success"] { background: var(--olive-wash); }
 </style>
 """
-st.markdown(_SHARED_CSS, unsafe_allow_html=True)
+if hasattr(st, "html"):
+    st.html(_SHARED_CSS)
+else:
+    st.markdown(_SHARED_CSS, unsafe_allow_html=True)
 
 st.markdown(
     "<div style='font-family:\"Public Sans\",sans-serif;font-size:0.72rem;color:var(--ink-muted);"
