@@ -35,19 +35,328 @@ PALLETS_CSV = "pallets.csv"
 PACKING_CSV = "product_packing.csv"
 
 # --- Streamlit Setup ---
-st.set_page_config(layout="wide", page_title="Cost Calculator")
+st.set_page_config(layout="wide", page_title="Ledger — Cost & Logistics", page_icon="◐")
 
-# --- Add Logo to Sidebar Here ---
+# --- Inject styling (fonts, palette, typography) ---
+CUSTOM_CSS = """
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wdth,wght@12..96,75..100,400..700&family=Public+Sans:ital,wght@0,300..700;1,400&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --ink: oklch(0.22 0.012 80);
+  --ink-soft: oklch(0.38 0.012 80);
+  --ink-muted: oklch(0.52 0.012 80);
+  --paper: oklch(0.975 0.008 85);
+  --paper-2: oklch(0.955 0.010 85);
+  --rule: oklch(0.88 0.012 85);
+  --rule-soft: oklch(0.92 0.010 85);
+  --olive: oklch(0.42 0.08 140);
+  --olive-ink: oklch(0.30 0.06 140);
+  --olive-wash: oklch(0.93 0.035 140);
+  --claret: oklch(0.48 0.14 25);
+  --sun: oklch(0.72 0.14 75);
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --space-8: 64px;
+}
+
+html, body, [data-testid="stAppViewContainer"] {
+  background: var(--paper) !important;
+  color: var(--ink);
+  font-family: "Public Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-feature-settings: "ss01", "cv11", "tnum" off;
+  font-optical-sizing: auto;
+  letter-spacing: -0.005em;
+}
+
+/* Hide Streamlit chrome we don't want */
+#MainMenu, footer, header [data-testid="stToolbar"] { visibility: hidden; }
+[data-testid="stHeader"] { background: transparent; }
+
+/* Top masthead title */
+h1, [data-testid="stAppViewContainer"] h1 {
+  font-family: "Bricolage Grotesque", ui-sans-serif, system-ui, sans-serif;
+  font-variation-settings: "wght" 500, "wdth" 85, "opsz" 64;
+  font-weight: 500;
+  font-size: clamp(2.1rem, 3.6vw, 3.1rem);
+  line-height: 1.02;
+  letter-spacing: -0.025em;
+  color: var(--ink);
+  margin: var(--space-3) 0 var(--space-2);
+}
+
+h2, [data-testid="stAppViewContainer"] h2 {
+  font-family: "Bricolage Grotesque", ui-sans-serif, system-ui, sans-serif;
+  font-variation-settings: "wght" 520, "wdth" 92, "opsz" 32;
+  font-size: 1.45rem;
+  letter-spacing: -0.015em;
+  color: var(--ink);
+  margin-top: var(--space-6);
+  margin-bottom: var(--space-3);
+}
+
+h3 {
+  font-family: "Bricolage Grotesque", ui-sans-serif, system-ui, sans-serif;
+  font-variation-settings: "wght" 550, "wdth" 100, "opsz" 24;
+  font-size: 1.08rem;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+  margin-top: var(--space-5);
+}
+
+/* Editorial sub-rule under the title */
+[data-testid="stAppViewContainer"] > .main > div > div > div:first-child h1::after {
+  content: "";
+  display: block;
+  width: 56px;
+  height: 2px;
+  background: var(--olive);
+  margin-top: var(--space-3);
+}
+
+p, span, label, li {
+  font-family: "Public Sans", ui-sans-serif, system-ui, sans-serif;
+  color: var(--ink);
+}
+
+label, [data-testid="stWidgetLabel"] p {
+  font-size: 0.78rem !important;
+  font-weight: 500 !important;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-soft) !important;
+}
+
+/* Top-level horizontal rules become hairlines */
+hr { border: 0; border-top: 1px solid var(--rule); margin: var(--space-6) 0; }
+
+/* Sidebar */
+[data-testid="stSidebar"] {
+  background: var(--paper-2);
+  border-right: 1px solid var(--rule);
+}
+[data-testid="stSidebar"] [data-testid="stWidgetLabel"] p { color: var(--ink-soft) !important; }
+[data-testid="stSidebar"] h2, [data-testid="stSidebar"] h3 { margin-top: var(--space-5); }
+[data-testid="stSidebar"] .stSubheader, [data-testid="stSidebar"] h3 {
+  font-family: "Bricolage Grotesque", sans-serif;
+  font-variation-settings: "wght" 560, "wdth" 88;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--olive-ink);
+  border-bottom: 1px solid var(--rule);
+  padding-bottom: var(--space-2);
+}
+
+/* Buttons */
+.stButton > button, .stDownloadButton > button, [data-testid="stFormSubmitButton"] button {
+  font-family: "Public Sans", sans-serif;
+  font-weight: 500;
+  font-size: 0.88rem;
+  letter-spacing: 0.02em;
+  border-radius: 2px;
+  border: 1px solid var(--ink);
+  background: var(--ink);
+  color: var(--paper);
+  padding: 10px 18px;
+  transition: transform 160ms cubic-bezier(0.2,0.8,0.2,1), background 160ms ease, color 160ms ease;
+}
+.stButton > button:hover, .stDownloadButton > button:hover, [data-testid="stFormSubmitButton"] button:hover {
+  background: var(--olive);
+  border-color: var(--olive);
+  color: var(--paper);
+  transform: translateY(-1px);
+}
+.stButton > button:focus, [data-testid="stFormSubmitButton"] button:focus { box-shadow: 0 0 0 3px var(--olive-wash); outline: none; }
+
+/* Sidebar buttons — ghost style */
+[data-testid="stSidebar"] .stButton > button {
+  background: transparent;
+  color: var(--ink);
+  border: 1px solid var(--rule);
+}
+[data-testid="stSidebar"] .stButton > button:hover {
+  background: var(--olive-wash);
+  color: var(--olive-ink);
+  border-color: var(--olive);
+}
+
+/* Inputs */
+input, textarea, select, [data-baseweb="input"] input, [data-baseweb="select"] > div {
+  font-family: "Public Sans", sans-serif !important;
+  color: var(--ink) !important;
+}
+[data-baseweb="input"] input, [data-baseweb="select"] > div, [data-testid="stNumberInput"] input,
+[data-testid="stTextInput"] input {
+  background: var(--paper) !important;
+  border-radius: 2px !important;
+}
+[data-baseweb="base-input"] { background: var(--paper) !important; }
+
+/* Numeric inputs: tabular */
+[data-testid="stNumberInput"] input { font-family: "JetBrains Mono", ui-monospace, monospace !important; font-feature-settings: "tnum"; font-size: 0.92rem; }
+
+/* Radio & checkboxes */
+.stRadio label, .stCheckbox label { font-size: 0.9rem !important; text-transform: none !important; letter-spacing: 0 !important; color: var(--ink) !important; font-weight: 400 !important; }
+
+/* Metrics — editorial card with tabular figures */
+[data-testid="stMetric"] {
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  padding: var(--space-4) var(--space-5);
+  position: relative;
+}
+[data-testid="stMetricLabel"] p {
+  font-family: "Public Sans", sans-serif;
+  font-size: 0.72rem !important;
+  font-weight: 500 !important;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-muted) !important;
+}
+[data-testid="stMetricValue"] {
+  font-family: "JetBrains Mono", ui-monospace, monospace !important;
+  font-feature-settings: "tnum", "ss01";
+  font-weight: 500 !important;
+  font-size: 1.55rem !important;
+  letter-spacing: -0.015em;
+  color: var(--ink) !important;
+  margin-top: 2px;
+}
+[data-testid="stMetricDelta"] { font-family: "Public Sans", sans-serif; font-size: 0.78rem; color: var(--ink-muted); }
+
+/* Tabs */
+.stTabs [data-baseweb="tab-list"] {
+  gap: 0;
+  border-bottom: 1px solid var(--rule);
+  padding-bottom: 0;
+}
+.stTabs [data-baseweb="tab"] {
+  font-family: "Bricolage Grotesque", sans-serif;
+  font-variation-settings: "wght" 520, "wdth" 92;
+  font-size: 0.92rem;
+  letter-spacing: 0.02em;
+  color: var(--ink-muted);
+  background: transparent;
+  padding: 12px 20px;
+  border-radius: 0;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  transition: color 160ms ease, border-color 160ms ease;
+}
+.stTabs [data-baseweb="tab"]:hover { color: var(--ink); }
+.stTabs [aria-selected="true"] {
+  color: var(--ink) !important;
+  border-bottom: 2px solid var(--olive) !important;
+  background: transparent !important;
+}
+.stTabs [data-baseweb="tab-highlight"], .stTabs [data-baseweb="tab-border"] { display: none; }
+
+/* Dataframes */
+[data-testid="stDataFrame"] {
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+}
+[data-testid="stDataFrame"] [role="columnheader"] {
+  font-family: "Public Sans", sans-serif !important;
+  font-size: 0.7rem !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-soft) !important;
+  background: var(--paper-2) !important;
+}
+
+/* Expander */
+[data-testid="stExpander"] {
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  background: var(--paper);
+}
+[data-testid="stExpander"] summary { font-family: "Bricolage Grotesque", sans-serif; font-variation-settings: "wght" 500, "wdth" 95; color: var(--ink); }
+
+/* Alerts — flat, editorial, no stripes */
+[data-testid="stAlert"] {
+  border-radius: 2px;
+  border: 1px solid var(--rule);
+  background: var(--paper);
+  font-family: "Public Sans", sans-serif;
+  color: var(--ink);
+  padding: var(--space-4) var(--space-5);
+}
+[data-testid="stAlert"][kind="info"] { background: var(--paper-2); }
+[data-testid="stAlert"][kind="warning"] { background: color-mix(in oklch, var(--sun) 12%, var(--paper)); border-color: color-mix(in oklch, var(--sun) 40%, var(--rule)); }
+[data-testid="stAlert"][kind="error"] { background: color-mix(in oklch, var(--claret) 8%, var(--paper)); border-color: color-mix(in oklch, var(--claret) 35%, var(--rule)); }
+[data-testid="stAlert"][kind="success"] { background: var(--olive-wash); border-color: color-mix(in oklch, var(--olive) 35%, var(--rule)); }
+
+/* Plotly chart background */
+.js-plotly-plot .plotly .bg { fill: var(--paper) !important; }
+
+/* Captions */
+.stCaption, [data-testid="stCaptionContainer"], [data-testid="stCaption"] {
+  font-family: "Public Sans", sans-serif;
+  font-size: 0.78rem;
+  color: var(--ink-muted);
+  font-style: italic;
+}
+
+/* Download links */
+a { color: var(--olive-ink); text-decoration: none; border-bottom: 1px solid var(--olive); transition: background 160ms ease, color 160ms ease; padding-bottom: 1px; }
+a:hover { background: var(--olive-wash); color: var(--ink); }
+
+/* Radio groups — stack with breathing room */
+.stRadio [role="radiogroup"] { gap: var(--space-2); }
+
+/* Columns gap rhythm */
+[data-testid="column"] { padding: 0 var(--space-3); }
+
+/* Reduce motion */
+@media (prefers-reduced-motion: reduce) {
+  * { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
+}
+</style>
+"""
+st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
+
+# --- Sidebar masthead ---
 with st.sidebar:
     try:
-        # Adjust the width as needed
-        st.image("assets/Logo.png", width=100)
+        st.image("assets/Logo.png", width=96)
     except FileNotFoundError:
-        st.error("Logo file not found. Make sure 'your_logo.png' is in the correct path.")
+        st.error("Logo file not found. Make sure 'Logo.png' is in assets/.")
     except Exception as e:
         st.error(f"An error occurred loading the logo: {e}")
+    st.markdown(
+        "<div style='font-family:\"Bricolage Grotesque\",sans-serif;font-variation-settings:\"wght\" 500,\"wdth\" 85;"
+        "font-size:1.05rem;color:var(--ink);letter-spacing:-0.01em;margin-top:8px;'>Ledger</div>"
+        "<div style='font-family:\"Public Sans\",sans-serif;font-size:0.72rem;color:var(--ink-muted);"
+        "letter-spacing:0.14em;text-transform:uppercase;margin-bottom:18px;'>Cost &amp; Logistics Workbench</div>",
+        unsafe_allow_html=True,
+    )
 
+# --- Masthead ---
+st.markdown(
+    "<div style='font-family:\"Public Sans\",sans-serif;font-size:0.72rem;color:var(--ink-muted);"
+    "letter-spacing:0.18em;text-transform:uppercase;margin-bottom:-4px;'>"
+    "Volume &middot; Margin &middot; Freight</div>",
+    unsafe_allow_html=True,
+)
 st.title("Product Cost & Logistics Calculator")
+st.markdown(
+    "<p style='font-family:\"Public Sans\",sans-serif;font-size:1.02rem;color:var(--ink-soft);"
+    "max-width:68ch;margin-top:-4px;margin-bottom:28px;line-height:1.55;'>"
+    "A merchant's workbench for computing COGS, freight and margin on export consignments — "
+    "from raw fruit cost through pallet, airway bill and retailer rebate.</p>",
+    unsafe_allow_html=True,
+)
 
 # --- Exchange Rate Functions ---
 @st.cache_data(ttl=3600)
@@ -457,9 +766,9 @@ if auto_calc_boxes and selected_product and product_packing_df is not None:
 num_pallets = st.sidebar.number_input("Number of Pallets:", min_value=0, value=1, step=1)
 
 if auto_calc_boxes and can_auto_calc:
-    calculated_boxes = num_pallets * boxes_per_pallet
+    calculated_boxes = int(max(1, num_pallets * boxes_per_pallet))
     quantity_input = st.sidebar.number_input( "Quantity (Boxes/Units):", min_value=1, value=calculated_boxes, step=1, disabled=True, help=f"Auto: {num_pallets} pallets * {boxes_per_pallet} boxes/pallet")
-    st.sidebar.caption(f"Using {boxes_per_pallet} Boxes/Pallet for {selected_product}")
+    st.sidebar.caption(f"Using {int(boxes_per_pallet)} Boxes/Pallet for {selected_product}")
 else:
      quantity_input = st.sidebar.number_input("Quantity (Boxes/Units):", min_value=1, value=100, step=1, disabled=False, help="Enter manually, or check box above to calculate from pallets.")
 
@@ -866,10 +1175,20 @@ if calculation_ready and st.sidebar.button("Calculate Costs"):
                 plot_data_filtered = {k: v for k, v in plot_data.items() if v > 0}
                 if plot_data_filtered:
                     plot_df = pd.DataFrame(list(plot_data_filtered.items()), columns=pd.Index(["Cost Category", "Total Cost (USD)"]))
+                    _ledger_palette = ["#3F5A3A", "#8A6B3C", "#B6914E", "#5D4A38", "#A74B3A", "#6F7E4B"]
                     fig = px.pie(plot_df, names='Cost Category', values='Total Cost (USD)',
-                                 title='Cost Breakdown by Component (Before Rebate)', # Updated title
-                                 hole=.3)
-                    fig.update_traces(textposition='inside', textinfo='percent+label')
+                                 title='Cost breakdown by component (before rebate)',
+                                 hole=.55,
+                                 color_discrete_sequence=_ledger_palette)
+                    fig.update_traces(textposition='outside', textinfo='percent+label',
+                                      marker=dict(line=dict(color="#F7F4EC", width=2)))
+                    fig.update_layout(
+                        paper_bgcolor="#F7F4EC", plot_bgcolor="#F7F4EC",
+                        font=dict(family="Public Sans, sans-serif", color="#1F1D18", size=13),
+                        title=dict(font=dict(family="Bricolage Grotesque, sans-serif", size=18, color="#1F1D18"), x=0, xanchor="left"),
+                        legend=dict(font=dict(family="Public Sans, sans-serif", size=12)),
+                        margin=dict(l=10, r=10, t=60, b=10)
+                    )
                     st.plotly_chart(fig, use_container_width=True)
                 else: st.write("No primary cost components > 0 for chart.")
 
@@ -946,10 +1265,18 @@ if calculation_ready and st.sidebar.button("Calculate Costs"):
 
                     # Add a graph for Cost Sensitivity Analysis
                     fig = go.Figure()
-                    fig.add_trace(go.Scatter(x=sensitivity_df['Markup %'], y=sensitivity_df['Profit per Box'].apply(lambda x: float(x.replace('$','').replace(',','').replace('€',''))), mode='lines+markers', name='Profit per Box'))
-                    fig.add_trace(go.Scatter(x=sensitivity_df['Markup %'], y=sensitivity_df['Profit Margin %'].apply(lambda x: float(x.replace('%',''))), mode='lines+markers', name='Profit Margin %'))
-                    fig.add_trace(go.Scatter(x=sensitivity_df['Markup %'], y=sensitivity_df['ROI %'].apply(lambda x: float(x.replace('%',''))), mode='lines+markers', name='ROI %'))
-                    fig.update_layout(title='Cost Sensitivity Analysis', xaxis_title='Markup %', yaxis_title='Value', legend_title='Metric')
+                    _line_palette = ["#3F5A3A", "#8A6B3C", "#A74B3A"]
+                    fig.add_trace(go.Scatter(x=sensitivity_df['Markup %'], y=sensitivity_df['Profit per Box'].apply(lambda x: float(x.replace('$','').replace(',','').replace('€',''))), mode='lines+markers', name='Profit per Box', line=dict(color=_line_palette[0], width=2.2), marker=dict(size=7)))
+                    fig.add_trace(go.Scatter(x=sensitivity_df['Markup %'], y=sensitivity_df['Profit Margin %'].apply(lambda x: float(x.replace('%',''))), mode='lines+markers', name='Profit Margin %', line=dict(color=_line_palette[1], width=2.2), marker=dict(size=7)))
+                    fig.add_trace(go.Scatter(x=sensitivity_df['Markup %'], y=sensitivity_df['ROI %'].apply(lambda x: float(x.replace('%',''))), mode='lines+markers', name='ROI %', line=dict(color=_line_palette[2], width=2.2), marker=dict(size=7)))
+                    fig.update_layout(
+                        title=dict(text='Cost sensitivity', font=dict(family="Bricolage Grotesque, sans-serif", size=18, color="#1F1D18"), x=0, xanchor="left"),
+                        xaxis=dict(title='Markup %', gridcolor="#E3DECF", zerolinecolor="#E3DECF", linecolor="#C8C2B0"),
+                        yaxis=dict(title='Value', gridcolor="#E3DECF", zerolinecolor="#E3DECF", linecolor="#C8C2B0"),
+                        paper_bgcolor="#F7F4EC", plot_bgcolor="#F7F4EC",
+                        font=dict(family="Public Sans, sans-serif", color="#1F1D18", size=13),
+                        legend=dict(font=dict(size=12)), margin=dict(l=20, r=20, t=60, b=40)
+                    )
                     st.plotly_chart(fig, use_container_width=True)
                     
             else:
@@ -1087,7 +1414,7 @@ if 'cost_history' in st.session_state and st.session_state['cost_history']:
         st.rerun()
 
 # --- Input prompts if calculation isn't ready ---
-else:
+if not st.session_state.get('calculation_done', False):
     # Check specific conditions to give more targeted advice
     if not selected_product: st.warning("Select a product to begin.")
     elif quantity_input < 1: st.warning("Enter a valid Quantity (>= 1).")

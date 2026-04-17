@@ -8,8 +8,75 @@ RECIPE_CSV = "product_recipe.csv"
 WEIGHTS_CSV = "product_weights.csv"
 PACKING_CSV = "product_packing.csv"
 
-st.set_page_config(page_title="Add Product", layout="wide")
-st.title("Add Product")
+st.set_page_config(page_title="Add Product — Ledger", layout="wide", page_icon="◐")
+
+# Reuse the same editorial styling as the main app
+_SHARED_CSS = """
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wdth,wght@12..96,75..100,400..700&family=Public+Sans:ital,wght@0,300..700;1,400&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --ink: oklch(0.22 0.012 80);
+  --ink-soft: oklch(0.38 0.012 80);
+  --ink-muted: oklch(0.52 0.012 80);
+  --paper: oklch(0.975 0.008 85);
+  --paper-2: oklch(0.955 0.010 85);
+  --rule: oklch(0.88 0.012 85);
+  --olive: oklch(0.42 0.08 140);
+  --olive-ink: oklch(0.30 0.06 140);
+  --olive-wash: oklch(0.93 0.035 140);
+}
+html, body, [data-testid="stAppViewContainer"] {
+  background: var(--paper) !important;
+  color: var(--ink);
+  font-family: "Public Sans", ui-sans-serif, system-ui, sans-serif;
+}
+#MainMenu, footer { visibility: hidden; }
+h1 { font-family: "Bricolage Grotesque", sans-serif; font-variation-settings: "wght" 500, "wdth" 85, "opsz" 64; font-size: clamp(2rem, 3.2vw, 2.8rem); letter-spacing: -0.025em; line-height: 1.02; color: var(--ink); margin: 12px 0 4px; }
+h2 { font-family: "Bricolage Grotesque", sans-serif; font-variation-settings: "wght" 520, "wdth" 92; font-size: 1.35rem; letter-spacing: -0.015em; color: var(--ink); margin-top: 32px; }
+h3 { font-family: "Bricolage Grotesque", sans-serif; font-variation-settings: "wght" 550, "wdth" 100; font-size: 1.05rem; color: var(--ink); }
+label, [data-testid="stWidgetLabel"] p { font-size: 0.78rem !important; font-weight: 500 !important; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-soft) !important; }
+[data-testid="stSidebar"] { background: var(--paper-2); border-right: 1px solid var(--rule); }
+hr { border: 0; border-top: 1px solid var(--rule); margin: 32px 0; }
+.stButton > button, .stDownloadButton > button, [data-testid="stFormSubmitButton"] button {
+  font-family: "Public Sans", sans-serif; font-weight: 500; font-size: 0.88rem; letter-spacing: 0.02em;
+  border-radius: 2px; border: 1px solid var(--ink); background: var(--ink); color: var(--paper);
+  padding: 10px 18px; transition: background 160ms ease, transform 160ms ease;
+}
+.stButton > button:hover, [data-testid="stFormSubmitButton"] button:hover {
+  background: var(--olive); border-color: var(--olive); transform: translateY(-1px);
+}
+input, textarea, [data-baseweb="input"] input { font-family: "Public Sans", sans-serif !important; background: var(--paper) !important; border-radius: 2px !important; color: var(--ink) !important; }
+[data-testid="stNumberInput"] input { font-family: "JetBrains Mono", monospace !important; font-feature-settings: "tnum"; }
+.stTabs [data-baseweb="tab-list"] { gap: 0; border-bottom: 1px solid var(--rule); }
+.stTabs [data-baseweb="tab"] {
+  font-family: "Bricolage Grotesque", sans-serif; font-variation-settings: "wght" 520, "wdth" 92;
+  font-size: 0.92rem; color: var(--ink-muted); background: transparent; padding: 12px 20px;
+  border-radius: 0; border-bottom: 2px solid transparent; margin-bottom: -1px;
+}
+.stTabs [aria-selected="true"] { color: var(--ink) !important; border-bottom: 2px solid var(--olive) !important; background: transparent !important; }
+.stTabs [data-baseweb="tab-highlight"], .stTabs [data-baseweb="tab-border"] { display: none; }
+[data-testid="stDataFrame"] { border: 1px solid var(--rule); border-radius: 2px; font-family: "JetBrains Mono", monospace; }
+[data-testid="stAlert"] { border-radius: 2px; border: 1px solid var(--rule); background: var(--paper); }
+[data-testid="stAlert"][kind="success"] { background: var(--olive-wash); }
+</style>
+"""
+st.markdown(_SHARED_CSS, unsafe_allow_html=True)
+
+st.markdown(
+    "<div style='font-family:\"Public Sans\",sans-serif;font-size:0.72rem;color:var(--ink-muted);"
+    "letter-spacing:0.18em;text-transform:uppercase;margin-bottom:-4px;'>"
+    "Catalogue &middot; Components &middot; Recipes</div>",
+    unsafe_allow_html=True,
+)
+st.title("Add a Product")
+st.markdown(
+    "<p style='font-family:\"Public Sans\",sans-serif;font-size:1rem;color:var(--ink-soft);"
+    "max-width:64ch;margin-top:-2px;margin-bottom:24px;line-height:1.55;'>"
+    "Register a new SKU with its recipe, weight and packing so the calculator can price it.</p>",
+    unsafe_allow_html=True,
+)
 
 
 def load_csv_or_stop(path, required_cols, decimal_char="."):
