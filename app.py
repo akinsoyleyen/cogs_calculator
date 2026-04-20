@@ -13,17 +13,26 @@ import numpy as np  # Add this import at the top for np.unique
 import plotly.graph_objects as go
 
 # --- Constants ---
-FALLBACK_TRY_TO_USD = 0.025  # Fallback rate if API fails
-FALLBACK_USD_TO_EUR = 0.85   # Fallback USD to EUR rate if API fails
 INTEREST_RATE = 0.05  # 5% interest rate
-INTEREST_COST_ITEM_NAME = "Calc. Interest"  # Name for calculated interest cost
+INTEREST_COST_ITEM_NAME = "Calc. Interest"
 
-# --- API URLs ---
-FRANKFURTER_API_URL = "https://api.frankfurter.app/latest?from=TRY&to=USD"
-FRANKFURTER_USD_EUR_API_URL = "https://api.frankfurter.app/latest?from=USD&to=EUR"
+# Everything in the app is stored and computed in USD. A single display FX is
+# applied at the end to convert results into any chosen reporting currency.
+DISPLAY_CURRENCIES = ["USD", "EUR", "GBP", "TRY", "CAD", "CHF", "JPY", "AED", "SGD", "AUD"]
+CURRENCY_SYMBOLS = {
+    "USD": "$", "EUR": "€", "GBP": "£", "TRY": "₺", "CAD": "C$",
+    "CHF": "CHF ", "JPY": "¥", "AED": "د.إ ", "SGD": "S$", "AUD": "A$"
+}
+FALLBACK_USD_RATES = {  # USD -> target, used when Frankfurter fails
+    "USD": 1.0, "EUR": 0.90, "GBP": 0.78, "TRY": 38.00, "CAD": 1.38,
+    "CHF": 0.90, "JPY": 148.0, "AED": 3.67, "SGD": 1.34, "AUD": 1.52
+}
 
-# --- Global variables ---
-usd_to_eur_rate = FALLBACK_USD_TO_EUR  # Initialize with fallback rate
+# Frankfurter supports a single base→target lookup
+FRANKFURTER_URL_TEMPLATE = "https://api.frankfurter.app/latest?from=USD&to={target}"
+
+# Legacy aliases (some code still reads these — kept for backward compatibility)
+exchange_rate = 1.0  # TRY rate no longer used; retained as a no-op multiplier
 
 # --- File Paths ---
 COMPONENTS_CSV = "components.csv"
@@ -40,36 +49,36 @@ st.set_page_config(layout="wide", page_title="Ledger — Cost & Logistics", page
 # --- Inject styling (fonts, palette, typography) ---
 CUSTOM_CSS = """
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wdth,wght@12..96,75..100,400..700&family=Public+Sans:ital,wght@0,300..700;1,400&family=JetBrains+Mono:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
 :root {
-  --ink: oklch(0.22 0.012 80);
-  --ink-soft: oklch(0.38 0.012 80);
-  --ink-muted: oklch(0.52 0.012 80);
-  --paper: oklch(0.975 0.008 85);
-  --paper-2: oklch(0.955 0.010 85);
-  --rule: oklch(0.88 0.012 85);
-  --rule-soft: oklch(0.92 0.010 85);
-  --olive: oklch(0.42 0.08 140);
-  --olive-ink: oklch(0.30 0.06 140);
-  --olive-wash: oklch(0.93 0.035 140);
-  --claret: oklch(0.48 0.14 25);
-  --sun: oklch(0.72 0.14 75);
-  --space-1: 4px;
-  --space-2: 8px;
-  --space-3: 12px;
-  --space-4: 16px;
-  --space-5: 24px;
-  --space-6: 32px;
-  --space-7: 48px;
-  --space-8: 64px;
+  /* Ink on paper — minimalist, inspired by SwingScope Light */
+  --paper:   #fafaf7;
+  --paper-2: #f4f3ee;
+  --paper-3: #ebe9e1;
+  --card:    #ffffff;
+  --rule:      rgba(20, 16, 30, 0.08);
+  --rule-soft: rgba(20, 16, 30, 0.14);
+  --ink:       #15121f;
+  --ink-soft:  #3a3545;
+  --ink-muted: #6c6478;
+  --ink-faint: #a8a0b0;
+  /* Restrained accents — pink is the single brand signal; green/red for up/down data only */
+  --pink:   #e11d74;
+  --amber:  #b87d00;
+  --violet: #6b3fd4;
+  --cyan:   #0b8f7e;
+  --up:     #0b8f7e;
+  --down:   #c23b3b;
+  --space-1: 4px;  --space-2: 8px;  --space-3: 12px;
+  --space-4: 16px; --space-5: 24px; --space-6: 32px;
+  --space-7: 48px; --space-8: 64px;
 }
 
 html, body, [data-testid="stAppViewContainer"] {
   background: var(--paper) !important;
   color: var(--ink);
-  font-family: "Public Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-  font-feature-settings: "ss01", "cv11", "tnum" off;
-  font-optical-sizing: auto;
+  font-family: "Space Grotesk", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-feature-settings: "tnum", "ss01";
   letter-spacing: -0.005em;
 }
 
@@ -79,20 +88,20 @@ html, body, [data-testid="stAppViewContainer"] {
 
 /* Top masthead title */
 h1, [data-testid="stAppViewContainer"] h1 {
-  font-family: "Bricolage Grotesque", ui-sans-serif, system-ui, sans-serif;
-  font-variation-settings: "wght" 500, "wdth" 85, "opsz" 64;
-  font-weight: 500;
-  font-size: clamp(2.1rem, 3.6vw, 3.1rem);
-  line-height: 1.02;
-  letter-spacing: -0.025em;
+  font-family: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+  font-weight: 600;
+  font-size: clamp(2rem, 3.4vw, 2.8rem);
+  line-height: 1.05;
+  letter-spacing: -0.03em;
   color: var(--ink);
   margin: var(--space-3) 0 var(--space-2);
 }
+h1 em { font-style: normal; color: var(--pink); }
 
 h2, [data-testid="stAppViewContainer"] h2 {
-  font-family: "Bricolage Grotesque", ui-sans-serif, system-ui, sans-serif;
-  font-variation-settings: "wght" 520, "wdth" 92, "opsz" 32;
-  font-size: 1.45rem;
+  font-family: "Space Grotesk", sans-serif;
+  font-weight: 600;
+  font-size: 1.35rem;
   letter-spacing: -0.015em;
   color: var(--ink);
   margin-top: var(--space-6);
@@ -100,35 +109,28 @@ h2, [data-testid="stAppViewContainer"] h2 {
 }
 
 h3 {
-  font-family: "Bricolage Grotesque", ui-sans-serif, system-ui, sans-serif;
-  font-variation-settings: "wght" 550, "wdth" 100, "opsz" 24;
-  font-size: 1.08rem;
-  letter-spacing: -0.01em;
-  color: var(--ink);
+  font-family: "Space Grotesk", sans-serif;
+  font-weight: 600;
+  font-size: 0.72rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
   margin-top: var(--space-5);
-}
-
-/* Editorial sub-rule under the title */
-[data-testid="stAppViewContainer"] > .main > div > div > div:first-child h1::after {
-  content: "";
-  display: block;
-  width: 56px;
-  height: 2px;
-  background: var(--olive);
-  margin-top: var(--space-3);
+  margin-bottom: var(--space-2);
 }
 
 p, span, label, li {
-  font-family: "Public Sans", ui-sans-serif, system-ui, sans-serif;
+  font-family: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
   color: var(--ink);
 }
 
 label, [data-testid="stWidgetLabel"] p {
-  font-size: 0.78rem !important;
+  font-family: "JetBrains Mono", ui-monospace, monospace !important;
+  font-size: 0.68rem !important;
   font-weight: 500 !important;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: var(--ink-soft) !important;
+  color: var(--ink-muted) !important;
 }
 
 /* Top-level horizontal rules become hairlines */
@@ -136,53 +138,55 @@ hr { border: 0; border-top: 1px solid var(--rule); margin: var(--space-6) 0; }
 
 /* Sidebar */
 [data-testid="stSidebar"] {
-  background: var(--paper-2);
+  background: var(--card);
   border-right: 1px solid var(--rule);
 }
-[data-testid="stSidebar"] [data-testid="stWidgetLabel"] p { color: var(--ink-soft) !important; }
-[data-testid="stSidebar"] h2, [data-testid="stSidebar"] h3 { margin-top: var(--space-5); }
+[data-testid="stSidebar"] [data-testid="stWidgetLabel"] p { color: var(--ink-muted) !important; }
 [data-testid="stSidebar"] .stSubheader, [data-testid="stSidebar"] h3 {
-  font-family: "Bricolage Grotesque", sans-serif;
-  font-variation-settings: "wght" 560, "wdth" 88;
-  font-size: 0.78rem;
+  font-family: "JetBrains Mono", ui-monospace, monospace !important;
+  font-size: 0.62rem !important;
+  font-weight: 600 !important;
   text-transform: uppercase;
-  letter-spacing: 0.12em;
-  color: var(--olive-ink);
+  letter-spacing: 0.18em;
+  color: var(--ink) !important;
   border-bottom: 1px solid var(--rule);
   padding-bottom: var(--space-2);
+  margin-top: var(--space-5);
 }
 
-/* Buttons */
+/* Buttons — filled ink primary, like SwingScope Light .btn-primary */
 .stButton > button, .stDownloadButton > button, [data-testid="stFormSubmitButton"] button {
-  font-family: "Public Sans", sans-serif;
-  font-weight: 500;
-  font-size: 0.88rem;
-  letter-spacing: 0.02em;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-weight: 600;
+  font-size: 0.78rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
   border-radius: 2px;
   border: 1px solid var(--ink);
   background: var(--ink);
   color: var(--paper);
-  padding: 10px 18px;
-  transition: transform 160ms cubic-bezier(0.2,0.8,0.2,1), background 160ms ease, color 160ms ease;
+  padding: 11px 18px;
+  transition: transform 160ms cubic-bezier(0.2,0.8,0.2,1), background 160ms ease, box-shadow 160ms ease;
 }
 .stButton > button:hover, .stDownloadButton > button:hover, [data-testid="stFormSubmitButton"] button:hover {
-  background: var(--olive);
-  border-color: var(--olive);
-  color: var(--paper);
+  background: var(--pink);
+  border-color: var(--pink);
+  color: #fff;
   transform: translateY(-1px);
+  box-shadow: 0 2px 10px rgba(225,29,116,0.22);
 }
-.stButton > button:focus, [data-testid="stFormSubmitButton"] button:focus { box-shadow: 0 0 0 3px var(--olive-wash); outline: none; }
+.stButton > button:focus, [data-testid="stFormSubmitButton"] button:focus { box-shadow: 0 0 0 3px rgba(225,29,116,0.18); outline: none; }
 
 /* Sidebar buttons — ghost style */
 [data-testid="stSidebar"] .stButton > button {
   background: transparent;
   color: var(--ink);
-  border: 1px solid var(--rule);
+  border: 1px solid var(--rule-soft);
 }
 [data-testid="stSidebar"] .stButton > button:hover {
-  background: var(--olive-wash);
-  color: var(--olive-ink);
-  border-color: var(--olive);
+  background: var(--paper-2);
+  color: var(--ink);
+  border-color: var(--ink);
 }
 
 /* Inputs */
@@ -203,19 +207,22 @@ input, textarea, select, [data-baseweb="input"] input, [data-baseweb="select"] >
 /* Radio & checkboxes */
 .stRadio label, .stCheckbox label { font-size: 0.9rem !important; text-transform: none !important; letter-spacing: 0 !important; color: var(--ink) !important; font-weight: 400 !important; }
 
-/* Metrics — editorial card with tabular figures */
+/* Metrics — stat-card with left-border accent (SwingScope Light) */
 [data-testid="stMetric"] {
-  background: var(--paper);
+  background: var(--card);
   border: 1px solid var(--rule);
+  border-left: 2px solid var(--pink);
   border-radius: 2px;
   padding: var(--space-4) var(--space-5);
   position: relative;
+  transition: border-color 160ms ease;
 }
+[data-testid="stMetric"]:hover { border-left-color: var(--ink); }
 [data-testid="stMetricLabel"] p {
-  font-family: "Public Sans", sans-serif;
-  font-size: 0.72rem !important;
+  font-family: "JetBrains Mono", ui-monospace, monospace !important;
+  font-size: 0.62rem !important;
   font-weight: 500 !important;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.18em;
   text-transform: uppercase;
   color: var(--ink-muted) !important;
 }
@@ -223,53 +230,55 @@ input, textarea, select, [data-baseweb="input"] input, [data-baseweb="select"] >
   font-family: "JetBrains Mono", ui-monospace, monospace !important;
   font-feature-settings: "tnum", "ss01";
   font-weight: 500 !important;
-  font-size: 1.55rem !important;
-  letter-spacing: -0.015em;
+  font-size: 1.6rem !important;
+  letter-spacing: -0.02em;
   color: var(--ink) !important;
-  margin-top: 2px;
+  margin-top: 6px;
 }
-[data-testid="stMetricDelta"] { font-family: "Public Sans", sans-serif; font-size: 0.78rem; color: var(--ink-muted); }
+[data-testid="stMetricDelta"] { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 0.72rem; color: var(--ink-muted); }
 
-/* Tabs */
+/* Tabs — understated, active = ink underline */
 .stTabs [data-baseweb="tab-list"] {
-  gap: 0;
+  gap: 2px;
   border-bottom: 1px solid var(--rule);
   padding-bottom: 0;
 }
 .stTabs [data-baseweb="tab"] {
-  font-family: "Bricolage Grotesque", sans-serif;
-  font-variation-settings: "wght" 520, "wdth" 92;
-  font-size: 0.92rem;
-  letter-spacing: 0.02em;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-weight: 500;
+  font-size: 0.72rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
   color: var(--ink-muted);
   background: transparent;
-  padding: 12px 20px;
+  padding: 12px 16px;
   border-radius: 0;
-  border-bottom: 2px solid transparent;
+  border-bottom: 1px solid transparent;
   margin-bottom: -1px;
-  transition: color 160ms ease, border-color 160ms ease;
+  transition: color 120ms ease, border-color 120ms ease;
 }
 .stTabs [data-baseweb="tab"]:hover { color: var(--ink); }
 .stTabs [aria-selected="true"] {
   color: var(--ink) !important;
-  border-bottom: 2px solid var(--olive) !important;
+  border-bottom: 1px solid var(--ink) !important;
   background: transparent !important;
 }
 .stTabs [data-baseweb="tab-highlight"], .stTabs [data-baseweb="tab-border"] { display: none; }
 
 /* Dataframes */
-[data-testid="stDataFrame"] {
+[data-testid="stDataFrame"], [data-testid="stDataEditor"] {
   border: 1px solid var(--rule);
   border-radius: 2px;
   font-family: "JetBrains Mono", ui-monospace, monospace;
+  background: var(--card);
 }
-[data-testid="stDataFrame"] [role="columnheader"] {
-  font-family: "Public Sans", sans-serif !important;
-  font-size: 0.7rem !important;
+[data-testid="stDataFrame"] [role="columnheader"], [data-testid="stDataEditor"] [role="columnheader"] {
+  font-family: "JetBrains Mono", ui-monospace, monospace !important;
+  font-size: 0.62rem !important;
   font-weight: 600 !important;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: var(--ink-soft) !important;
+  color: var(--ink-muted) !important;
   background: var(--paper-2) !important;
 }
 
@@ -277,38 +286,37 @@ input, textarea, select, [data-baseweb="input"] input, [data-baseweb="select"] >
 [data-testid="stExpander"] {
   border: 1px solid var(--rule);
   border-radius: 2px;
-  background: var(--paper);
+  background: var(--card);
 }
-[data-testid="stExpander"] summary { font-family: "Bricolage Grotesque", sans-serif; font-variation-settings: "wght" 500, "wdth" 95; color: var(--ink); }
+[data-testid="stExpander"] summary { font-family: "Space Grotesk", sans-serif; font-weight: 600; color: var(--ink); }
 
-/* Alerts — flat, editorial, no stripes */
+/* Alerts — flat, minimalist */
 [data-testid="stAlert"] {
   border-radius: 2px;
   border: 1px solid var(--rule);
-  background: var(--paper);
-  font-family: "Public Sans", sans-serif;
+  background: var(--card);
+  font-family: "Space Grotesk", sans-serif;
   color: var(--ink);
   padding: var(--space-4) var(--space-5);
 }
-[data-testid="stAlert"][kind="info"] { background: var(--paper-2); }
-[data-testid="stAlert"][kind="warning"] { background: color-mix(in oklch, var(--sun) 12%, var(--paper)); border-color: color-mix(in oklch, var(--sun) 40%, var(--rule)); }
-[data-testid="stAlert"][kind="error"] { background: color-mix(in oklch, var(--claret) 8%, var(--paper)); border-color: color-mix(in oklch, var(--claret) 35%, var(--rule)); }
-[data-testid="stAlert"][kind="success"] { background: var(--olive-wash); border-color: color-mix(in oklch, var(--olive) 35%, var(--rule)); }
+[data-testid="stAlert"][kind="info"]    { background: var(--paper-2); border-left: 2px solid var(--violet); }
+[data-testid="stAlert"][kind="warning"] { background: color-mix(in oklab, var(--amber) 6%, var(--card)); border-left: 2px solid var(--amber); }
+[data-testid="stAlert"][kind="error"]   { background: color-mix(in oklab, var(--down) 6%, var(--card));  border-left: 2px solid var(--down); }
+[data-testid="stAlert"][kind="success"] { background: color-mix(in oklab, var(--up) 6%, var(--card));    border-left: 2px solid var(--up); }
 
 /* Plotly chart background */
-.js-plotly-plot .plotly .bg { fill: var(--paper) !important; }
+.js-plotly-plot .plotly .bg { fill: var(--card) !important; }
 
 /* Captions */
 .stCaption, [data-testid="stCaptionContainer"], [data-testid="stCaption"] {
-  font-family: "Public Sans", sans-serif;
+  font-family: "Space Grotesk", sans-serif;
   font-size: 0.78rem;
   color: var(--ink-muted);
-  font-style: italic;
 }
 
-/* Download links */
-a { color: var(--olive-ink); text-decoration: none; border-bottom: 1px solid var(--olive); transition: background 160ms ease, color 160ms ease; padding-bottom: 1px; }
-a:hover { background: var(--olive-wash); color: var(--ink); }
+/* Links — pink underline, SwingScope Light highlighter */
+a { color: var(--ink); text-decoration: none; background-image: linear-gradient(transparent 62%, rgba(225,29,116,0.18) 62%); padding: 0 2px; border: none; transition: background-image 160ms ease; }
+a:hover { background-image: linear-gradient(transparent 0%, rgba(225,29,116,0.22) 0%); color: var(--pink); }
 
 /* Radio groups — stack with breathing room */
 .stRadio [role="radiogroup"] { gap: var(--space-2); }
@@ -336,90 +344,74 @@ with st.sidebar:
     except Exception as e:
         st.error(f"An error occurred loading the logo: {e}")
     st.markdown(
-        "<div style='font-family:\"Bricolage Grotesque\",sans-serif;font-variation-settings:\"wght\" 500,\"wdth\" 85;"
-        "font-size:1.05rem;color:var(--ink);letter-spacing:-0.01em;margin-top:8px;'>Ledger</div>"
-        "<div style='font-family:\"Public Sans\",sans-serif;font-size:0.72rem;color:var(--ink-muted);"
-        "letter-spacing:0.14em;text-transform:uppercase;margin-bottom:18px;'>Cost &amp; Logistics Workbench</div>",
+        "<div style='font-family:\"Space Grotesk\",sans-serif;font-weight:600;"
+        "font-size:1.05rem;color:var(--ink);letter-spacing:-0.02em;margin-top:8px;'>"
+        "Ledger<span style='color:var(--pink)'>.</span></div>"
+        "<div style='font-family:\"JetBrains Mono\",monospace;font-size:0.62rem;color:var(--ink-muted);"
+        "letter-spacing:0.2em;text-transform:uppercase;margin-bottom:18px;'>Cost · Logistics · Margin</div>",
         unsafe_allow_html=True,
     )
 
 # --- Masthead ---
 st.markdown(
-    "<div style='font-family:\"Public Sans\",sans-serif;font-size:0.72rem;color:var(--ink-muted);"
-    "letter-spacing:0.18em;text-transform:uppercase;margin-bottom:-4px;'>"
-    "Volume &middot; Margin &middot; Freight</div>",
+    "<div style='font-family:\"JetBrains Mono\",monospace;font-size:0.66rem;color:var(--ink-muted);"
+    "letter-spacing:0.24em;text-transform:uppercase;margin-bottom:-4px;'>"
+    "Landed · Cost · Calculator</div>",
     unsafe_allow_html=True,
 )
-st.title("Product Cost & Logistics Calculator")
 st.markdown(
-    "<p style='font-family:\"Public Sans\",sans-serif;font-size:1.02rem;color:var(--ink-soft);"
+    "<h1 style='margin-top:4px'>Product Cost &amp; <em>Logistics</em> Calculator</h1>",
+    unsafe_allow_html=True,
+)
+st.markdown(
+    "<p style='font-family:\"Space Grotesk\",sans-serif;font-size:1rem;color:var(--ink-soft);"
     "max-width:68ch;margin-top:-4px;margin-bottom:28px;line-height:1.55;'>"
-    "A merchant's workbench for computing COGS, freight and margin on export consignments — "
-    "from raw fruit cost through pallet, airway bill and retailer rebate.</p>",
+    "Everything in USD. One FX at the end — pick any currency you want to report in.</p>",
     unsafe_allow_html=True,
 )
 
 # --- Exchange Rate Functions ---
 @st.cache_data(ttl=3600)
-def get_usd_to_eur_rate():
+def get_usd_to_target_rate(target_currency: str):
+    """Fetch live USD -> target rate from Frankfurter. Returns (rate, date|None)."""
+    if target_currency == "USD":
+        return 1.0, "native"
     try:
-        response = requests.get(FRANKFURTER_USD_EUR_API_URL, timeout=10)
+        response = requests.get(FRANKFURTER_URL_TEMPLATE.format(target=target_currency), timeout=10)
         response.raise_for_status()
         data = response.json()
-        rate = data.get('rates', {}).get('EUR')
-        date = data.get('date', 'N/A')
+        rate = data.get('rates', {}).get(target_currency)
+        date = data.get('date', None)
         if rate:
-            st.session_state['usd_eur_rate_source'] = f"API ({date})"
-            st.session_state['usd_eur_rate_date'] = date
-            return float(rate)
-        else:
-            st.session_state['usd_eur_rate_source'] = "API Error (Rate Missing)"
-            st.session_state['usd_eur_rate_date'] = None
-            return None
-    except Exception as e:
-        st.session_state['usd_eur_rate_source'] = f"API Failed ({type(e).__name__})"
-        st.session_state['usd_eur_rate_date'] = None
-        return None
+            return float(rate), date
+    except Exception:
+        pass
+    return None, None
 
-# --- Helper function to format costs with both USD and Euro ---
-def format_cost_usd_eur(usd_amount):
-    """Format a USD amount to show both USD and Euro values"""
-    if usd_amount == 0:
-        return "$0.00 / €0.00"
-    
-    # Get the current USD to EUR rate from sidebar
-    global usd_to_eur_rate
-    if usd_to_eur_rate is None:
-        usd_to_eur_rate = FALLBACK_USD_TO_EUR
-    
-    eur_amount = usd_amount * usd_to_eur_rate
-    return f"${usd_amount:,.2f} / €{eur_amount:,.2f}"
+# --- Display formatting ---
+# These three module-level variables are initialised further down, after the sidebar
+# lets the user pick a reporting currency. All intermediate math is in USD.
+display_currency = "USD"
+display_fx_rate = 1.0
+display_symbol = "$"
+
+def format_cost(usd_amount):
+    """Convert a USD amount to the chosen display currency and format it."""
+    if usd_amount is None:
+        return f"{display_symbol}0.00"
+    amt = float(usd_amount) * display_fx_rate
+    return f"{display_symbol}{amt:,.2f}"
+
+# Backward-compat shims — keep the old signatures so call sites don't have to change.
+def format_cost_by_mode(usd_amount, _mode_unused=None):
+    return format_cost(usd_amount)
 
 def format_cost_usd_only(usd_amount):
-    """Format a USD amount to show only USD values"""
-    if usd_amount == 0:
-        return "$0.00"
-    return f"${usd_amount:,.2f}"
+    return f"${0.0 if usd_amount is None else float(usd_amount):,.2f}"
 
 def format_cost_eur_only(usd_amount):
-    """Format a USD amount to show only EUR values"""
-    if usd_amount == 0:
-        return "€0.00"
-    
-    # Get the current USD to EUR rate from sidebar
-    global usd_to_eur_rate
-    if usd_to_eur_rate is None:
-        usd_to_eur_rate = FALLBACK_USD_TO_EUR
-    
-    eur_amount = usd_amount * usd_to_eur_rate
-    return f"€{eur_amount:,.2f}"
-
-def format_cost_by_mode(usd_amount, mode):
-    """Format cost based on display mode"""
-    if mode == "EUR Only":
-        return format_cost_eur_only(usd_amount)
-    else:  # USD Only (default)
-        return format_cost_usd_only(usd_amount)
+    # Retained for any external code paths; now returns the chosen display currency.
+    return format_cost(usd_amount)
 
 def calculate_profit_margins(cost_per_box, sales_price_per_box):
     """Calculate profit margins for given cost and sales price"""
@@ -461,8 +453,8 @@ def create_csv_export(summary_data_dict, profit_data, calculation_details):
     if profit_data:
         export_data.append(["Profit Analysis"])
         export_data.append(["Cost per Box (USD)", f"${profit_data.get('final_cost_per_box_usd', 0):,.2f}"])
-        export_data.append(["Cost per Box (EUR)", f"€{profit_data.get('final_cost_per_box_usd', 0) * usd_to_eur_rate:,.2f}"])
-    
+        export_data.append([f"Cost per Box ({display_currency})", format_cost(profit_data.get('final_cost_per_box_usd', 0))])
+
     return pd.DataFrame(export_data)
 
 def create_excel_export(summary_data_dict, profit_data, calculation_details, sensitivity_data):
@@ -499,7 +491,7 @@ def create_excel_export(summary_data_dict, profit_data, calculation_details, sen
         ws_profit.append([f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"])
         ws_profit.append([])
         ws_profit.append(["Cost per Box (USD)", f"${profit_data.get('final_cost_per_box_usd', 0):,.2f}"])
-        ws_profit.append(["Cost per Box (EUR)", f"€{profit_data.get('final_cost_per_box_usd', 0) * usd_to_eur_rate:,.2f}"])
+        ws_profit.append([f"Cost per Box ({display_currency})", format_cost(profit_data.get('final_cost_per_box_usd', 0))])
         
         # Add sensitivity analysis
         if sensitivity_data:
@@ -526,104 +518,72 @@ def get_download_link(data, filename, file_type):
         href = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="{filename}">Download Excel</a>'
     return href
 
-# --- Function to Fetch Exchange Rate ---
-# ... (function remains the same) ...
-@st.cache_data(ttl=3600)
-def get_try_to_usd_rate():
-    try:
-        response = requests.get(FRANKFURTER_API_URL, timeout=10)
-        response.raise_for_status()
-        data = response.json()
-        rate = data.get('rates', {}).get('USD')
-        date = data.get('date', 'N/A')
-        if rate:
-            st.session_state['rate_source'] = f"API ({date})"
-            st.session_state['rate_date'] = date
-            return float(rate)
-        else:
-            st.session_state['rate_source'] = "API Error (Rate Missing)"
-            st.session_state['rate_date'] = None
-            return None
-    except Exception as e:
-        st.session_state['rate_source'] = f"API Failed ({type(e).__name__})"
-        st.session_state['rate_date'] = None
-        return None
-
 # --- Initialize session state ---
-# ... (initialization remains the same) ...
-if 'rate_source' not in st.session_state: st.session_state['rate_source'] = "Not Fetched"
-if 'rate_date' not in st.session_state: st.session_state['rate_date'] = None
-# Add USD to EUR rate tracking
-if 'usd_eur_rate_source' not in st.session_state: st.session_state['usd_eur_rate_source'] = "Not Fetched"
-if 'usd_eur_rate_date' not in st.session_state: st.session_state['usd_eur_rate_date'] = None
-# Add defaults for values needed by other pages if not present
 if 'calculation_done' not in st.session_state: st.session_state['calculation_done'] = False
 if 'final_cost_per_box_usd' not in st.session_state: st.session_state['final_cost_per_box_usd'] = 0.0
 
 
-# --- Exchange Rate Handling (Includes Radio Button) ---
-# ... (logic remains the same) ...
-st.sidebar.subheader("Exchange Rate (TRY->USD)")
-rate_source_choice = st.sidebar.radio("Select Rate Source:", ("Automatic (Frankfurter API)", "Manual Input"), key="rate_choice", index=0)
-exchange_rate = None; manual_rate_input = None; rate_display_value = "N/A"; rate_display_source = "Not Set"
-if rate_source_choice == "Automatic (Frankfurter API)":
-    exchange_rate = get_try_to_usd_rate()
-    if exchange_rate is None: st.sidebar.warning(f"⚠️ API Failed ({st.session_state.get('rate_source', '?')}). Enter rate manually:"); manual_rate_input = st.sidebar.number_input("Enter TRY to USD Rate (Fallback):", min_value=0.0001, value=FALLBACK_TRY_TO_USD, step=0.0001, format="%.6f", key="manual_rate_fallback"); exchange_rate = manual_rate_input; rate_display_source = "Manual Fallback"; rate_display_value = f"{exchange_rate:.6f}" if exchange_rate is not None else "Error"
-    else: rate_display_source = st.session_state.get('rate_source', 'API'); rate_display_value = f"{exchange_rate:.6f}"; st.sidebar.success("Live rate fetched!")
-elif rate_source_choice == "Manual Input":
-    manual_rate_input = st.sidebar.number_input("Enter TRY to USD Rate Manually:", min_value=0.0001, value=FALLBACK_TRY_TO_USD, step=0.0001, format="%.6f", key="manual_rate_direct")
-    exchange_rate = manual_rate_input; rate_display_source = "Manual Input"; rate_display_value = f"{exchange_rate:.6f}" if exchange_rate is not None else "Error"
-if exchange_rate is None or not isinstance(exchange_rate, (int, float)) or exchange_rate <= 0: exchange_rate = FALLBACK_TRY_TO_USD; rate_display_source = "Fallback Default"; rate_display_value = f"{exchange_rate:.6f}"; st.sidebar.warning("Using default fallback rate.")
-st.sidebar.metric(label=f"TRY to USD Rate Used ({rate_display_source})", value=rate_display_value)
-
-# --- USD to EUR Exchange Rate Handling ---
-st.sidebar.subheader("Exchange Rate (USD->EUR)")
-
-usd_eur_rate_source_choice = st.sidebar.radio("Select USD->EUR Rate Source:", ("Automatic (Frankfurter API)", "Manual Input"), key="usd_eur_rate_choice", index=0)
-manual_usd_eur_rate_input = None; usd_eur_rate_display_value = "N/A"; usd_eur_rate_display_source = "Not Set"
-
-if usd_eur_rate_source_choice == "Automatic (Frankfurter API)":
-    usd_to_eur_rate = get_usd_to_eur_rate()
-    if usd_to_eur_rate is None: 
-        st.sidebar.warning(f"⚠️ API Failed ({st.session_state.get('usd_eur_rate_source', '?')}). Enter rate manually:")
-        manual_usd_eur_rate_input = st.sidebar.number_input("Enter USD to EUR Rate (Fallback):", min_value=0.0001, value=FALLBACK_USD_TO_EUR, step=0.0001, format="%.4f", key="manual_usd_eur_rate_fallback")
-        usd_to_eur_rate = manual_usd_eur_rate_input
-        usd_eur_rate_display_source = "Manual Fallback"
-        usd_eur_rate_display_value = f"{usd_to_eur_rate:.4f}" if usd_to_eur_rate is not None else "Error"
-    else: 
-        usd_eur_rate_display_source = st.session_state.get('usd_eur_rate_source', 'API')
-        usd_eur_rate_display_value = f"{usd_to_eur_rate:.4f}"
-        st.sidebar.success("Live USD->EUR rate fetched!")
-elif usd_eur_rate_source_choice == "Manual Input":
-    manual_usd_eur_rate_input = st.sidebar.number_input("Enter USD to EUR Rate Manually:", min_value=0.0001, value=FALLBACK_USD_TO_EUR, step=0.0001, format="%.4f", key="manual_usd_eur_rate_direct")
-    usd_to_eur_rate = manual_usd_eur_rate_input
-    usd_eur_rate_display_source = "Manual Input"
-    usd_eur_rate_display_value = f"{usd_to_eur_rate:.4f}" if usd_to_eur_rate is not None else "Error"
-
-if usd_to_eur_rate is None or not isinstance(usd_to_eur_rate, (int, float)) or usd_to_eur_rate <= 0: 
-    usd_to_eur_rate = FALLBACK_USD_TO_EUR
-    usd_eur_rate_display_source = "Fallback Default"
-    usd_eur_rate_display_value = f"{usd_to_eur_rate:.4f}"
-    st.sidebar.warning("Using default USD->EUR fallback rate.")
-
-st.sidebar.metric(label=f"USD to EUR Rate Used ({usd_eur_rate_display_source})", value=usd_eur_rate_display_value)
-
-# --- Rate Refresh Button ---
-col_refresh1, col_refresh2 = st.sidebar.columns(2)
-if col_refresh1.button("🔄 Refresh TRY->USD", help="Refresh TRY to USD exchange rate"):
-    st.cache_data.clear()
-    st.rerun()
-if col_refresh2.button("🔄 Refresh USD->EUR", help="Refresh USD to EUR exchange rate"):
-    st.cache_data.clear()
-    st.rerun()
-
-# --- Currency Display Toggle ---
-st.sidebar.subheader("Currency Display")
-currency_display_mode = st.sidebar.selectbox(
-    "Display Currency:",
-    ["USD Only", "EUR Only"],
-    help="Choose how to display costs in the results"
+# --- Display Currency (single FX at the end) ---
+st.sidebar.subheader("Reporting Currency")
+display_currency = st.sidebar.selectbox(
+    "Display results in:",
+    DISPLAY_CURRENCIES,
+    index=0,
+    help="All inputs are in USD. Pick any currency here to convert the final output — one rate, applied at the end."
 )
+display_symbol = CURRENCY_SYMBOLS.get(display_currency, display_currency + " ")
+
+fx_mode = st.sidebar.radio(
+    "FX rate source",
+    ("Live (Frankfurter API)", "Manual"),
+    key="fx_mode",
+    index=0,
+    disabled=(display_currency == "USD")
+)
+
+if display_currency == "USD":
+    display_fx_rate = 1.0
+    fx_source = "native"
+    fx_date = None
+elif fx_mode == "Live (Frankfurter API)":
+    live_rate, fx_date = get_usd_to_target_rate(display_currency)
+    if live_rate is not None:
+        display_fx_rate = live_rate
+        fx_source = f"API ({fx_date})"
+    else:
+        st.sidebar.warning(f"Live rate unavailable for USD→{display_currency}. Enter manually:")
+        display_fx_rate = st.sidebar.number_input(
+            f"USD→{display_currency} rate",
+            min_value=0.000001,
+            value=float(FALLBACK_USD_RATES.get(display_currency, 1.0)),
+            step=0.0001,
+            format="%.6f",
+            key=f"manual_fx_fallback_{display_currency}",
+        )
+        fx_source = "Manual fallback"
+else:
+    display_fx_rate = st.sidebar.number_input(
+        f"USD→{display_currency} rate",
+        min_value=0.000001,
+        value=float(FALLBACK_USD_RATES.get(display_currency, 1.0)),
+        step=0.0001,
+        format="%.6f",
+        key=f"manual_fx_{display_currency}",
+    )
+    fx_source = "Manual"
+
+st.sidebar.metric(
+    label=f"USD → {display_currency}  ({fx_source})",
+    value=f"{display_fx_rate:.4f}" if display_currency != "USD" else "1.0000",
+)
+
+if st.sidebar.button("Refresh live FX", help="Clear cache and re-fetch FX rates", disabled=(display_currency == "USD")):
+    st.cache_data.clear()
+    st.rerun()
+
+# Kept as aliases so legacy code paths still work
+currency_display_mode = f"{display_currency} Only"
+usd_to_eur_rate = display_fx_rate if display_currency == "EUR" else FALLBACK_USD_RATES["EUR"]
 
 
 # --- Initialize DataFrames BEFORE loading ---
@@ -781,7 +741,7 @@ else: none_index = pallet_types.index("None") if "None" in pallet_types else 0; 
 # Raw Product Cost & Other Costs
 # ... (logic remains the same) ...
 st.sidebar.subheader("Costs") # Group remaining costs
-raw_cost_per_kg_try = st.sidebar.number_input("Raw Product Cost per KG (TRY):", min_value=0.0, value=50.0, step=0.1, format="%.2f")
+raw_cost_per_kg_try = st.sidebar.number_input("Raw Product Cost per KG (USD):", min_value=0.0, value=1.0, step=0.05, format="%.3f", help="Bare fruit cost per KG, in USD. One currency for everything.")
 
 # --- Show Fixed Cost Totals in Radio Options ---
 if fixed_df is not None:
@@ -811,7 +771,7 @@ else:
     fixed_cost_label_suffix = "(All)"
     fixed_cost_mode = "standard"
 
-unexpected_cost_try = st.sidebar.number_input("Unexpected Costs (Total TRY for Batch):", min_value=0.0, value=0.0, step=10.0, format="%.2f")
+unexpected_cost_try = st.sidebar.number_input("Unexpected Costs (USD for batch):", min_value=0.0, value=0.0, step=10.0, format="%.2f")
 include_variable_costs = st.sidebar.checkbox("Include Variable Component Costs in COGS?", value=True)
 
 
@@ -825,21 +785,17 @@ if selected_shipment_type == "Air":
     else: selected_destination = st.sidebar.selectbox("Select Destination (Air):", ["Select..."] + air_destinations) # Add select prompt
 
 manual_logistics_cost_usd = 0.0
+manual_logistics_cost_input = 0.0  # referenced in logistics-tab display block below
 if selected_shipment_type in ["Container", "Truck"]:
-    # Determine currency for display based on mode
-    logistics_currency = "EUR" if currency_display_mode == "EUR Only" else "USD"
     manual_logistics_cost_input = st.sidebar.number_input(
-        f"Enter Fixed {selected_shipment_type} Price ({logistics_currency}):",
+        f"Fixed {selected_shipment_type} Price (USD):",
         min_value=0.0,
         value=4000.0,
         step=50.0,
-        format="%.2f"
+        format="%.2f",
+        help="Enter the flat freight price in USD. The final output is converted to your reporting currency at the end.",
     )
-    # Convert EUR to USD if needed
-    if currency_display_mode == "EUR Only":
-        manual_logistics_cost_usd = manual_logistics_cost_input / usd_to_eur_rate
-    else:
-        manual_logistics_cost_usd = manual_logistics_cost_input
+    manual_logistics_cost_usd = manual_logistics_cost_input
 
 # *** NEW: Rebate Input ***
 st.sidebar.subheader("Sales Adjustments")
@@ -1090,7 +1046,7 @@ if calculation_ready and st.sidebar.button("Calculate Costs"):
         for err in calc_errors: st.error(f"- {err}")
         st.session_state['calculation_done'] = False # Ensure flag is false on error
     elif st.session_state.get('calculation_done', False): # Proceed only if calculation was successful
-        st.header("Calculation Results (in USD)")
+        st.header(f"Calculation Results (in {display_currency})")
 
         # Update top display line to include rebate % if applicable
         display_destination = f" | Dest: `{selected_destination}`" if selected_shipment_type == "Air" else ""
@@ -1132,12 +1088,7 @@ if calculation_ready and st.sidebar.button("Calculate Costs"):
             st.subheader("Logistics Components (Total)");
             if selected_shipment_type == "Air": col4a, col4b = st.columns(2); freight_cost = final_shipping_gross_weight_kg * logistics_rate_per_kg; col4a.metric("Freight Cost", format_cost_by_mode(freight_cost, currency_display_mode), f"{final_shipping_gross_weight_kg:.2f}kg @ {format_cost_by_mode(logistics_rate_per_kg, currency_display_mode)}/kg"); col4b.metric("Airway Bill Cost", format_cost_by_mode(awb_cost, currency_display_mode))
             elif selected_shipment_type in ["Container", "Truck"]:
-                # For Container/Truck, show the price in the selected currency
-                if currency_display_mode == "EUR Only":
-                    fixed_price_display = manual_logistics_cost_input
-                else:
-                    fixed_price_display = fixed_logistics_price
-                st.metric(f"{selected_shipment_type} Fixed Price", format_cost_by_mode(fixed_price_display, currency_display_mode))
+                st.metric(f"{selected_shipment_type} Fixed Price", format_cost(fixed_logistics_price))
             else: st.write("N/A")
 
         # --- Total Delivered Cost Tab (Modified for Rebate) ---
@@ -1176,18 +1127,18 @@ if calculation_ready and st.sidebar.button("Calculate Costs"):
                 plot_data_filtered = {k: v for k, v in plot_data.items() if v > 0}
                 if plot_data_filtered:
                     plot_df = pd.DataFrame(list(plot_data_filtered.items()), columns=pd.Index(["Cost Category", "Total Cost (USD)"]))
-                    _ledger_palette = ["#3F5A3A", "#8A6B3C", "#B6914E", "#5D4A38", "#A74B3A", "#6F7E4B"]
+                    _ledger_palette = ["#e11d74", "#6b3fd4", "#b87d00", "#0b8f7e", "#15121f", "#a8a0b0"]
                     fig = px.pie(plot_df, names='Cost Category', values='Total Cost (USD)',
                                  title='Cost breakdown by component (before rebate)',
-                                 hole=.55,
+                                 hole=.58,
                                  color_discrete_sequence=_ledger_palette)
                     fig.update_traces(textposition='outside', textinfo='percent+label',
-                                      marker=dict(line=dict(color="#F7F4EC", width=2)))
+                                      marker=dict(line=dict(color="#ffffff", width=2)))
                     fig.update_layout(
-                        paper_bgcolor="#F7F4EC", plot_bgcolor="#F7F4EC",
-                        font=dict(family="Public Sans, sans-serif", color="#1F1D18", size=13),
-                        title=dict(font=dict(family="Bricolage Grotesque, sans-serif", size=18, color="#1F1D18"), x=0, xanchor="left"),
-                        legend=dict(font=dict(family="Public Sans, sans-serif", size=12)),
+                        paper_bgcolor="#ffffff", plot_bgcolor="#ffffff",
+                        font=dict(family="Space Grotesk, sans-serif", color="#15121f", size=13),
+                        title=dict(font=dict(family="Space Grotesk, sans-serif", size=16, color="#15121f"), x=0, xanchor="left"),
+                        legend=dict(font=dict(family="JetBrains Mono, monospace", size=11)),
                         margin=dict(l=10, r=10, t=60, b=10)
                     )
                     st.plotly_chart(fig, use_container_width=True)
@@ -1266,17 +1217,19 @@ if calculation_ready and st.sidebar.button("Calculate Costs"):
 
                     # Add a graph for Cost Sensitivity Analysis
                     fig = go.Figure()
-                    _line_palette = ["#3F5A3A", "#8A6B3C", "#A74B3A"]
-                    fig.add_trace(go.Scatter(x=sensitivity_df['Markup %'], y=sensitivity_df['Profit per Box'].apply(lambda x: float(x.replace('$','').replace(',','').replace('€',''))), mode='lines+markers', name='Profit per Box', line=dict(color=_line_palette[0], width=2.2), marker=dict(size=7)))
-                    fig.add_trace(go.Scatter(x=sensitivity_df['Markup %'], y=sensitivity_df['Profit Margin %'].apply(lambda x: float(x.replace('%',''))), mode='lines+markers', name='Profit Margin %', line=dict(color=_line_palette[1], width=2.2), marker=dict(size=7)))
-                    fig.add_trace(go.Scatter(x=sensitivity_df['Markup %'], y=sensitivity_df['ROI %'].apply(lambda x: float(x.replace('%',''))), mode='lines+markers', name='ROI %', line=dict(color=_line_palette[2], width=2.2), marker=dict(size=7)))
+                    _line_palette = ["#e11d74", "#6b3fd4", "#0b8f7e"]
+                    def _coerce_num(s):
+                        return float(str(s).replace('$','').replace(',','').replace('€','').replace('£','').replace('₺','').replace('%','').replace('C$','').replace('A$','').replace('S$','').replace('CHF ','').replace('¥','').replace('د.إ ','').strip())
+                    fig.add_trace(go.Scatter(x=sensitivity_df['Markup %'], y=sensitivity_df['Profit per Box'].apply(_coerce_num), mode='lines+markers', name='Profit per Box', line=dict(color=_line_palette[0], width=2.2), marker=dict(size=7)))
+                    fig.add_trace(go.Scatter(x=sensitivity_df['Markup %'], y=sensitivity_df['Profit Margin %'].apply(_coerce_num), mode='lines+markers', name='Profit Margin %', line=dict(color=_line_palette[1], width=2.2), marker=dict(size=7)))
+                    fig.add_trace(go.Scatter(x=sensitivity_df['Markup %'], y=sensitivity_df['ROI %'].apply(_coerce_num), mode='lines+markers', name='ROI %', line=dict(color=_line_palette[2], width=2.2), marker=dict(size=7)))
                     fig.update_layout(
-                        title=dict(text='Cost sensitivity', font=dict(family="Bricolage Grotesque, sans-serif", size=18, color="#1F1D18"), x=0, xanchor="left"),
-                        xaxis=dict(title='Markup %', gridcolor="#E3DECF", zerolinecolor="#E3DECF", linecolor="#C8C2B0"),
-                        yaxis=dict(title='Value', gridcolor="#E3DECF", zerolinecolor="#E3DECF", linecolor="#C8C2B0"),
-                        paper_bgcolor="#F7F4EC", plot_bgcolor="#F7F4EC",
-                        font=dict(family="Public Sans, sans-serif", color="#1F1D18", size=13),
-                        legend=dict(font=dict(size=12)), margin=dict(l=20, r=20, t=60, b=40)
+                        title=dict(text='Cost sensitivity', font=dict(family="Space Grotesk, sans-serif", size=16, color="#15121f"), x=0, xanchor="left"),
+                        xaxis=dict(title='Markup %', gridcolor="rgba(20,16,30,0.08)", zerolinecolor="rgba(20,16,30,0.08)", linecolor="#d9d5e0"),
+                        yaxis=dict(title='Value', gridcolor="rgba(20,16,30,0.08)", zerolinecolor="rgba(20,16,30,0.08)", linecolor="#d9d5e0"),
+                        paper_bgcolor="#ffffff", plot_bgcolor="#ffffff",
+                        font=dict(family="Space Grotesk, sans-serif", color="#15121f", size=13),
+                        legend=dict(font=dict(size=11)), margin=dict(l=20, r=20, t=60, b=40)
                     )
                     st.plotly_chart(fig, use_container_width=True)
                     
