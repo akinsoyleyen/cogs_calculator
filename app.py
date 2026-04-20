@@ -12,6 +12,8 @@ import base64
 import numpy as np  # Add this import at the top for np.unique
 import plotly.graph_objects as go
 
+from theme import apply_theme, plot_style
+
 # --- Constants ---
 INTEREST_RATE = 0.05  # 5% interest rate
 INTEREST_COST_ITEM_NAME = "Calc. Interest"
@@ -46,294 +48,7 @@ PACKING_CSV = "product_packing.csv"
 # --- Streamlit Setup ---
 st.set_page_config(layout="wide", page_title="Ledger — Cost & Logistics", page_icon="◐")
 
-# --- Inject styling (fonts, palette, typography) ---
-CUSTOM_CSS = """
-<style>
-@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
-:root {
-  /* Ink on paper — minimalist, inspired by SwingScope Light */
-  --paper:   #fafaf7;
-  --paper-2: #f4f3ee;
-  --paper-3: #ebe9e1;
-  --card:    #ffffff;
-  --rule:      rgba(20, 16, 30, 0.08);
-  --rule-soft: rgba(20, 16, 30, 0.14);
-  --ink:       #15121f;
-  --ink-soft:  #3a3545;
-  --ink-muted: #6c6478;
-  --ink-faint: #a8a0b0;
-  /* Restrained accents — pink is the single brand signal; green/red for up/down data only */
-  --pink:   #e11d74;
-  --amber:  #b87d00;
-  --violet: #6b3fd4;
-  --cyan:   #0b8f7e;
-  --up:     #0b8f7e;
-  --down:   #c23b3b;
-  --space-1: 4px;  --space-2: 8px;  --space-3: 12px;
-  --space-4: 16px; --space-5: 24px; --space-6: 32px;
-  --space-7: 48px; --space-8: 64px;
-}
-
-html, body, [data-testid="stAppViewContainer"] {
-  background: var(--paper) !important;
-  color: var(--ink);
-  font-family: "Space Grotesk", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-  font-feature-settings: "tnum", "ss01";
-  letter-spacing: -0.005em;
-}
-
-/* Hide Streamlit chrome we don't want */
-#MainMenu, footer, header [data-testid="stToolbar"] { visibility: hidden; }
-[data-testid="stHeader"] { background: transparent; }
-
-/* Top masthead title */
-h1, [data-testid="stAppViewContainer"] h1 {
-  font-family: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
-  font-weight: 600;
-  font-size: clamp(2rem, 3.4vw, 2.8rem);
-  line-height: 1.05;
-  letter-spacing: -0.03em;
-  color: var(--ink);
-  margin: var(--space-3) 0 var(--space-2);
-}
-h1 em { font-style: normal; color: var(--pink); }
-
-h2, [data-testid="stAppViewContainer"] h2 {
-  font-family: "Space Grotesk", sans-serif;
-  font-weight: 600;
-  font-size: 1.35rem;
-  letter-spacing: -0.015em;
-  color: var(--ink);
-  margin-top: var(--space-6);
-  margin-bottom: var(--space-3);
-}
-
-h3 {
-  font-family: "Space Grotesk", sans-serif;
-  font-weight: 600;
-  font-size: 0.72rem;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  color: var(--ink-muted);
-  margin-top: var(--space-5);
-  margin-bottom: var(--space-2);
-}
-
-p, span, label, li {
-  font-family: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
-  color: var(--ink);
-}
-
-label, [data-testid="stWidgetLabel"] p {
-  font-family: "JetBrains Mono", ui-monospace, monospace !important;
-  font-size: 0.68rem !important;
-  font-weight: 500 !important;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--ink-muted) !important;
-}
-
-/* Top-level horizontal rules become hairlines */
-hr { border: 0; border-top: 1px solid var(--rule); margin: var(--space-6) 0; }
-
-/* Sidebar */
-[data-testid="stSidebar"] {
-  background: var(--card);
-  border-right: 1px solid var(--rule);
-}
-[data-testid="stSidebar"] [data-testid="stWidgetLabel"] p { color: var(--ink-muted) !important; }
-[data-testid="stSidebar"] .stSubheader, [data-testid="stSidebar"] h3 {
-  font-family: "JetBrains Mono", ui-monospace, monospace !important;
-  font-size: 0.62rem !important;
-  font-weight: 600 !important;
-  text-transform: uppercase;
-  letter-spacing: 0.18em;
-  color: var(--ink) !important;
-  border-bottom: 1px solid var(--rule);
-  padding-bottom: var(--space-2);
-  margin-top: var(--space-5);
-}
-
-/* Buttons — filled ink primary, like SwingScope Light .btn-primary */
-.stButton > button, .stDownloadButton > button, [data-testid="stFormSubmitButton"] button {
-  font-family: "JetBrains Mono", ui-monospace, monospace;
-  font-weight: 600;
-  font-size: 0.78rem;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  border-radius: 2px;
-  border: 1px solid var(--ink);
-  background: var(--ink);
-  color: var(--paper);
-  padding: 11px 18px;
-  transition: transform 160ms cubic-bezier(0.2,0.8,0.2,1), background 160ms ease, box-shadow 160ms ease;
-}
-.stButton > button:hover, .stDownloadButton > button:hover, [data-testid="stFormSubmitButton"] button:hover {
-  background: var(--pink);
-  border-color: var(--pink);
-  color: #fff;
-  transform: translateY(-1px);
-  box-shadow: 0 2px 10px rgba(225,29,116,0.22);
-}
-.stButton > button:focus, [data-testid="stFormSubmitButton"] button:focus { box-shadow: 0 0 0 3px rgba(225,29,116,0.18); outline: none; }
-
-/* Sidebar buttons — ghost style */
-[data-testid="stSidebar"] .stButton > button {
-  background: transparent;
-  color: var(--ink);
-  border: 1px solid var(--rule-soft);
-}
-[data-testid="stSidebar"] .stButton > button:hover {
-  background: var(--paper-2);
-  color: var(--ink);
-  border-color: var(--ink);
-}
-
-/* Inputs */
-input, textarea, select, [data-baseweb="input"] input, [data-baseweb="select"] > div {
-  font-family: "Public Sans", sans-serif !important;
-  color: var(--ink) !important;
-}
-[data-baseweb="input"] input, [data-baseweb="select"] > div, [data-testid="stNumberInput"] input,
-[data-testid="stTextInput"] input {
-  background: var(--paper) !important;
-  border-radius: 2px !important;
-}
-[data-baseweb="base-input"] { background: var(--paper) !important; }
-
-/* Numeric inputs: tabular */
-[data-testid="stNumberInput"] input { font-family: "JetBrains Mono", ui-monospace, monospace !important; font-feature-settings: "tnum"; font-size: 0.92rem; }
-
-/* Radio & checkboxes */
-.stRadio label, .stCheckbox label { font-size: 0.9rem !important; text-transform: none !important; letter-spacing: 0 !important; color: var(--ink) !important; font-weight: 400 !important; }
-
-/* Metrics — stat-card with left-border accent (SwingScope Light) */
-[data-testid="stMetric"] {
-  background: var(--card);
-  border: 1px solid var(--rule);
-  border-left: 2px solid var(--pink);
-  border-radius: 2px;
-  padding: var(--space-4) var(--space-5);
-  position: relative;
-  transition: border-color 160ms ease;
-}
-[data-testid="stMetric"]:hover { border-left-color: var(--ink); }
-[data-testid="stMetricLabel"] p {
-  font-family: "JetBrains Mono", ui-monospace, monospace !important;
-  font-size: 0.62rem !important;
-  font-weight: 500 !important;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  color: var(--ink-muted) !important;
-}
-[data-testid="stMetricValue"] {
-  font-family: "JetBrains Mono", ui-monospace, monospace !important;
-  font-feature-settings: "tnum", "ss01";
-  font-weight: 500 !important;
-  font-size: 1.6rem !important;
-  letter-spacing: -0.02em;
-  color: var(--ink) !important;
-  margin-top: 6px;
-}
-[data-testid="stMetricDelta"] { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 0.72rem; color: var(--ink-muted); }
-
-/* Tabs — understated, active = ink underline */
-.stTabs [data-baseweb="tab-list"] {
-  gap: 2px;
-  border-bottom: 1px solid var(--rule);
-  padding-bottom: 0;
-}
-.stTabs [data-baseweb="tab"] {
-  font-family: "JetBrains Mono", ui-monospace, monospace;
-  font-weight: 500;
-  font-size: 0.72rem;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--ink-muted);
-  background: transparent;
-  padding: 12px 16px;
-  border-radius: 0;
-  border-bottom: 1px solid transparent;
-  margin-bottom: -1px;
-  transition: color 120ms ease, border-color 120ms ease;
-}
-.stTabs [data-baseweb="tab"]:hover { color: var(--ink); }
-.stTabs [aria-selected="true"] {
-  color: var(--ink) !important;
-  border-bottom: 1px solid var(--ink) !important;
-  background: transparent !important;
-}
-.stTabs [data-baseweb="tab-highlight"], .stTabs [data-baseweb="tab-border"] { display: none; }
-
-/* Dataframes */
-[data-testid="stDataFrame"], [data-testid="stDataEditor"] {
-  border: 1px solid var(--rule);
-  border-radius: 2px;
-  font-family: "JetBrains Mono", ui-monospace, monospace;
-  background: var(--card);
-}
-[data-testid="stDataFrame"] [role="columnheader"], [data-testid="stDataEditor"] [role="columnheader"] {
-  font-family: "JetBrains Mono", ui-monospace, monospace !important;
-  font-size: 0.62rem !important;
-  font-weight: 600 !important;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--ink-muted) !important;
-  background: var(--paper-2) !important;
-}
-
-/* Expander */
-[data-testid="stExpander"] {
-  border: 1px solid var(--rule);
-  border-radius: 2px;
-  background: var(--card);
-}
-[data-testid="stExpander"] summary { font-family: "Space Grotesk", sans-serif; font-weight: 600; color: var(--ink); }
-
-/* Alerts — flat, minimalist */
-[data-testid="stAlert"] {
-  border-radius: 2px;
-  border: 1px solid var(--rule);
-  background: var(--card);
-  font-family: "Space Grotesk", sans-serif;
-  color: var(--ink);
-  padding: var(--space-4) var(--space-5);
-}
-[data-testid="stAlert"][kind="info"]    { background: var(--paper-2); border-left: 2px solid var(--violet); }
-[data-testid="stAlert"][kind="warning"] { background: color-mix(in oklab, var(--amber) 6%, var(--card)); border-left: 2px solid var(--amber); }
-[data-testid="stAlert"][kind="error"]   { background: color-mix(in oklab, var(--down) 6%, var(--card));  border-left: 2px solid var(--down); }
-[data-testid="stAlert"][kind="success"] { background: color-mix(in oklab, var(--up) 6%, var(--card));    border-left: 2px solid var(--up); }
-
-/* Plotly chart background */
-.js-plotly-plot .plotly .bg { fill: var(--card) !important; }
-
-/* Captions */
-.stCaption, [data-testid="stCaptionContainer"], [data-testid="stCaption"] {
-  font-family: "Space Grotesk", sans-serif;
-  font-size: 0.78rem;
-  color: var(--ink-muted);
-}
-
-/* Links — pink underline, SwingScope Light highlighter */
-a { color: var(--ink); text-decoration: none; background-image: linear-gradient(transparent 62%, rgba(225,29,116,0.18) 62%); padding: 0 2px; border: none; transition: background-image 160ms ease; }
-a:hover { background-image: linear-gradient(transparent 0%, rgba(225,29,116,0.22) 0%); color: var(--pink); }
-
-/* Radio groups — stack with breathing room */
-.stRadio [role="radiogroup"] { gap: var(--space-2); }
-
-/* Columns gap rhythm */
-[data-testid="column"] { padding: 0 var(--space-3); }
-
-/* Reduce motion */
-@media (prefers-reduced-motion: reduce) {
-  * { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
-}
-</style>
-"""
-if hasattr(st, "html"):
-    st.html(CUSTOM_CSS)
-else:
-    st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
+apply_theme("main")
 
 # --- Sidebar masthead ---
 with st.sidebar:
@@ -1127,18 +842,18 @@ if calculation_ready and st.sidebar.button("Calculate Costs"):
                 plot_data_filtered = {k: v for k, v in plot_data.items() if v > 0}
                 if plot_data_filtered:
                     plot_df = pd.DataFrame(list(plot_data_filtered.items()), columns=pd.Index(["Cost Category", "Total Cost (USD)"]))
-                    _ledger_palette = ["#e11d74", "#6b3fd4", "#b87d00", "#0b8f7e", "#15121f", "#a8a0b0"]
+                    _ps = plot_style()
                     fig = px.pie(plot_df, names='Cost Category', values='Total Cost (USD)',
                                  title='Cost breakdown by component (before rebate)',
                                  hole=.58,
-                                 color_discrete_sequence=_ledger_palette)
+                                 color_discrete_sequence=_ps["palette"])
                     fig.update_traces(textposition='outside', textinfo='percent+label',
-                                      marker=dict(line=dict(color="#ffffff", width=2)))
+                                      marker=dict(line=dict(color=_ps["marker_edge"], width=2)))
                     fig.update_layout(
-                        paper_bgcolor="#ffffff", plot_bgcolor="#ffffff",
-                        font=dict(family="Space Grotesk, sans-serif", color="#15121f", size=13),
-                        title=dict(font=dict(family="Space Grotesk, sans-serif", size=16, color="#15121f"), x=0, xanchor="left"),
-                        legend=dict(font=dict(family="JetBrains Mono, monospace", size=11)),
+                        paper_bgcolor=_ps["paper_bg"], plot_bgcolor=_ps["plot_bg"],
+                        font=dict(family="Space Grotesk, sans-serif", color=_ps["font_color"], size=13),
+                        title=dict(font=dict(family="Space Grotesk, sans-serif", size=16, color=_ps["title_color"]), x=0, xanchor="left"),
+                        legend=dict(font=dict(family="JetBrains Mono, monospace", size=11, color=_ps["font_color"])),
                         margin=dict(l=10, r=10, t=60, b=10)
                     )
                     st.plotly_chart(fig, use_container_width=True)
@@ -1217,19 +932,20 @@ if calculation_ready and st.sidebar.button("Calculate Costs"):
 
                     # Add a graph for Cost Sensitivity Analysis
                     fig = go.Figure()
-                    _line_palette = ["#e11d74", "#6b3fd4", "#0b8f7e"]
+                    _ps = plot_style()
+                    _line_palette = _ps["line_palette"]
                     def _coerce_num(s):
                         return float(str(s).replace('$','').replace(',','').replace('€','').replace('£','').replace('₺','').replace('%','').replace('C$','').replace('A$','').replace('S$','').replace('CHF ','').replace('¥','').replace('د.إ ','').strip())
                     fig.add_trace(go.Scatter(x=sensitivity_df['Markup %'], y=sensitivity_df['Profit per Box'].apply(_coerce_num), mode='lines+markers', name='Profit per Box', line=dict(color=_line_palette[0], width=2.2), marker=dict(size=7)))
                     fig.add_trace(go.Scatter(x=sensitivity_df['Markup %'], y=sensitivity_df['Profit Margin %'].apply(_coerce_num), mode='lines+markers', name='Profit Margin %', line=dict(color=_line_palette[1], width=2.2), marker=dict(size=7)))
                     fig.add_trace(go.Scatter(x=sensitivity_df['Markup %'], y=sensitivity_df['ROI %'].apply(_coerce_num), mode='lines+markers', name='ROI %', line=dict(color=_line_palette[2], width=2.2), marker=dict(size=7)))
                     fig.update_layout(
-                        title=dict(text='Cost sensitivity', font=dict(family="Space Grotesk, sans-serif", size=16, color="#15121f"), x=0, xanchor="left"),
-                        xaxis=dict(title='Markup %', gridcolor="rgba(20,16,30,0.08)", zerolinecolor="rgba(20,16,30,0.08)", linecolor="#d9d5e0"),
-                        yaxis=dict(title='Value', gridcolor="rgba(20,16,30,0.08)", zerolinecolor="rgba(20,16,30,0.08)", linecolor="#d9d5e0"),
-                        paper_bgcolor="#ffffff", plot_bgcolor="#ffffff",
-                        font=dict(family="Space Grotesk, sans-serif", color="#15121f", size=13),
-                        legend=dict(font=dict(size=11)), margin=dict(l=20, r=20, t=60, b=40)
+                        title=dict(text='Cost sensitivity', font=dict(family="Space Grotesk, sans-serif", size=16, color=_ps["title_color"]), x=0, xanchor="left"),
+                        xaxis=dict(title='Markup %', gridcolor=_ps["grid_color"], zerolinecolor=_ps["grid_color"], linecolor=_ps["axis_line"]),
+                        yaxis=dict(title='Value', gridcolor=_ps["grid_color"], zerolinecolor=_ps["grid_color"], linecolor=_ps["axis_line"]),
+                        paper_bgcolor=_ps["paper_bg"], plot_bgcolor=_ps["plot_bg"],
+                        font=dict(family="Space Grotesk, sans-serif", color=_ps["font_color"], size=13),
+                        legend=dict(font=dict(size=11, color=_ps["font_color"])), margin=dict(l=20, r=20, t=60, b=40)
                     )
                     st.plotly_chart(fig, use_container_width=True)
                     
