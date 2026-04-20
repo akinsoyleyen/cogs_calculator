@@ -2,26 +2,308 @@
 """Shared theming for the cogs_calculator Streamlit app.
 
 Two themes are available:
-- "light": SwingScope Light (warm paper, deep ink, pink accent) — default
-- "dark":  Dark Neon (near-black, neon pink + cyan, subtle glows)
+- "light": Editorial Light — warm paper, deep ink, pink accent (default)
+- "dark":  Dark Neon — near-black, neon pink + cyan accents
 
-Call apply_theme() at the top of each page. It injects the CSS,
-renders a sidebar selector, and returns the active theme key.
-plot_style() returns a dict of plotly colors for the active theme.
+Single typeface (Inter) throughout for consistency; tabular numerals
+on metric values so figures stay aligned. Call apply_theme() at the
+top of each page. plot_style() returns plotly colors for the active theme.
 """
 import streamlit as st
 
 
-_LIGHT_CSS = """
+# Shared font stack and element reset used by both themes.
+# Every readable surface is covered so that text in dropdowns, tables,
+# alerts, expanders, code blocks and the sidebar nav never disappears.
+_BASE_CSS_TEMPLATE = """
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
-:root {
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+:root {{
+  {tokens}
+}}
+
+html, body, [data-testid="stAppViewContainer"], [data-testid="stAppViewContainer"] * {{
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}}
+html, body, [data-testid="stAppViewContainer"] {{
+  background: var(--paper) !important;
+  color: var(--ink) !important;
+  letter-spacing: -0.005em;
+}}
+[data-testid="stAppViewContainer"] .main .block-container {{
+  color: var(--ink);
+}}
+#MainMenu, footer {{ visibility: hidden; }}
+[data-testid="stHeader"] {{ background: transparent; }}
+
+/* Headings */
+h1, h2, h3, h4, h5, h6 {{ color: var(--ink) !important; font-weight: 600; letter-spacing: -0.02em; }}
+h1 {{ font-size: clamp(1.9rem, 3vw, 2.4rem); line-height: 1.1; margin: 12px 0 6px; }}
+h1 em {{ font-style: normal; color: var(--pink); }}
+h2 {{ font-size: 1.35rem; margin-top: 28px; }}
+h3 {{ font-size: 1rem; color: var(--ink-soft) !important; margin-top: 20px; margin-bottom: 8px; font-weight: 600; letter-spacing: -0.01em; text-transform: none; }}
+h4 {{ font-size: 0.95rem; font-weight: 600; color: var(--ink) !important; }}
+
+/* Body text */
+p, li, span, div {{ color: var(--ink); }}
+[data-testid="stMarkdownContainer"] p,
+[data-testid="stMarkdownContainer"] li,
+[data-testid="stMarkdownContainer"] strong,
+[data-testid="stMarkdownContainer"] em,
+[data-testid="stText"] {{
+  color: var(--ink) !important;
+  font-size: 0.95rem;
+  line-height: 1.55;
+}}
+a {{ color: var(--pink); text-decoration: none; }}
+a:hover {{ text-decoration: underline; }}
+
+/* Widget labels — sentence case, gentle weight, readable size */
+label, [data-testid="stWidgetLabel"] p, [data-testid="stWidgetLabel"] label {{
+  font-family: "Inter", sans-serif !important;
+  font-size: 0.85rem !important;
+  font-weight: 500 !important;
+  letter-spacing: 0 !important;
+  text-transform: none !important;
+  color: var(--ink-soft) !important;
+}}
+
+/* Sidebar */
+[data-testid="stSidebar"] {{ background: var(--sidebar-bg); border-right: 1px solid var(--rule); }}
+[data-testid="stSidebar"] * {{ color: var(--ink) !important; }}
+[data-testid="stSidebar"] label, [data-testid="stSidebar"] [data-testid="stWidgetLabel"] p {{
+  color: var(--ink-soft) !important;
+}}
+[data-testid="stSidebarNav"] a, [data-testid="stSidebarNav"] span {{ color: var(--ink) !important; }}
+[data-testid="stSidebarNav"] a[aria-current="page"] {{
+  color: var(--pink) !important; font-weight: 600;
+}}
+
+/* Horizontal rule */
+hr {{ border: 0; border-top: 1px solid var(--rule); margin: 28px 0; }}
+
+/* Buttons */
+.stButton > button, .stDownloadButton > button, [data-testid="stFormSubmitButton"] button {{
+  font-family: "Inter", sans-serif;
+  font-weight: 600;
+  font-size: 0.9rem;
+  letter-spacing: 0;
+  text-transform: none;
+  border-radius: 4px;
+  border: 1px solid var(--btn-border);
+  background: var(--btn-bg);
+  color: var(--btn-fg);
+  padding: 9px 18px;
+  transition: background 160ms ease, color 160ms ease, box-shadow 160ms ease, transform 120ms ease;
+}}
+.stButton > button:hover, .stDownloadButton > button:hover, [data-testid="stFormSubmitButton"] button:hover {{
+  background: var(--pink);
+  border-color: var(--pink);
+  color: #ffffff;
+  transform: translateY(-1px);
+  box-shadow: var(--glow);
+}}
+
+/* Inputs */
+input, textarea {{
+  font-family: "Inter", sans-serif !important;
+  background: var(--card) !important;
+  color: var(--ink) !important;
+  border-radius: 4px !important;
+}}
+[data-baseweb="input"], [data-baseweb="input"] input,
+[data-baseweb="textarea"], [data-baseweb="textarea"] textarea {{
+  background: var(--card) !important;
+  color: var(--ink) !important;
+  border-color: var(--rule-soft) !important;
+}}
+[data-testid="stNumberInput"] input {{
+  font-feature-settings: "tnum";
+}}
+[data-testid="stNumberInput"] button {{
+  background: var(--card) !important; color: var(--ink) !important;
+  border-color: var(--rule-soft) !important;
+}}
+
+/* Selectbox + dropdown popover */
+[data-baseweb="select"] > div {{ background: var(--card) !important; color: var(--ink) !important; border-color: var(--rule-soft) !important; }}
+[data-baseweb="select"] * {{ color: var(--ink) !important; }}
+[role="listbox"], [data-baseweb="popover"], [data-baseweb="menu"] {{
+  background: var(--card) !important; color: var(--ink) !important;
+  border: 1px solid var(--rule-soft) !important;
+}}
+[role="option"] {{ color: var(--ink) !important; }}
+[role="option"]:hover {{ background: var(--paper-2) !important; }}
+[role="option"][aria-selected="true"] {{ background: var(--paper-2) !important; color: var(--pink) !important; }}
+
+/* Radio + checkbox */
+[data-baseweb="radio"] *, [data-baseweb="checkbox"] * {{ color: var(--ink) !important; }}
+
+/* Tabs */
+.stTabs [data-baseweb="tab-list"] {{ gap: 2px; border-bottom: 1px solid var(--rule); }}
+.stTabs [data-baseweb="tab"] {{
+  font-family: "Inter", sans-serif;
+  font-weight: 500;
+  font-size: 0.92rem;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--ink-muted);
+  background: transparent;
+  padding: 10px 16px;
+  border-radius: 0;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}}
+.stTabs [data-baseweb="tab"]:hover {{ color: var(--ink); }}
+.stTabs [aria-selected="true"] {{
+  color: var(--tab-active-fg) !important;
+  border-bottom: 2px solid var(--tab-active-fg) !important;
+  background: transparent !important;
+  font-weight: 600;
+}}
+.stTabs [data-baseweb="tab-highlight"], .stTabs [data-baseweb="tab-border"] {{ display: none; }}
+
+/* DataFrames + DataEditor */
+[data-testid="stDataFrame"], [data-testid="stDataEditor"] {{
+  border: 1px solid var(--rule); border-radius: 4px; background: var(--card);
+}}
+[data-testid="stDataFrame"] *, [data-testid="stDataEditor"] * {{
+  color: var(--ink) !important;
+}}
+[data-testid="stDataFrame"] [role="columnheader"], [data-testid="stDataEditor"] [role="columnheader"] {{
+  font-family: "Inter", sans-serif !important;
+  font-size: 0.8rem !important; font-weight: 600 !important;
+  letter-spacing: 0 !important;
+  text-transform: none !important;
+  color: var(--ink-soft) !important;
+  background: var(--paper-2) !important;
+}}
+[data-testid="stDataFrame"] [role="gridcell"], [data-testid="stDataEditor"] [role="gridcell"] {{
+  background: var(--card) !important;
+  color: var(--ink) !important;
+  border-color: var(--rule) !important;
+}}
+
+/* Alerts (info / success / error / warning) */
+[data-testid="stAlert"] {{ border-radius: 4px; border: 1px solid var(--rule); background: var(--card); }}
+[data-testid="stAlert"] * {{ color: var(--ink) !important; }}
+[data-testid="stAlert"][kind="success"], [data-testid="stAlert"][data-baseweb*="success"] {{
+  background: var(--alert-success-bg); border-left: 3px solid var(--up);
+}}
+[data-testid="stAlert"][kind="error"], [data-testid="stAlert"][data-baseweb*="error"] {{
+  background: var(--alert-error-bg); border-left: 3px solid var(--down);
+}}
+[data-testid="stAlert"][kind="info"], [data-testid="stAlert"][data-baseweb*="info"] {{
+  background: var(--alert-info-bg); border-left: 3px solid var(--pink);
+}}
+[data-testid="stAlert"][kind="warning"], [data-testid="stAlert"][data-baseweb*="warning"] {{
+  background: var(--alert-warning-bg); border-left: 3px solid var(--amber);
+}}
+
+/* Metrics */
+[data-testid="stMetric"] {{
+  background: var(--card);
+  border: 1px solid var(--rule);
+  border-left: 3px solid var(--pink);
+  border-radius: 4px; padding: 14px 20px;
+  box-shadow: var(--metric-shadow);
+}}
+[data-testid="stMetricLabel"] p, [data-testid="stMetricLabel"] {{
+  font-family: "Inter", sans-serif !important;
+  font-size: 0.8rem !important;
+  font-weight: 500 !important;
+  letter-spacing: 0 !important;
+  text-transform: none !important;
+  color: var(--ink-soft) !important;
+}}
+[data-testid="stMetricValue"], [data-testid="stMetricValue"] div {{
+  font-family: "Inter", sans-serif !important;
+  font-feature-settings: "tnum";
+  font-weight: 600 !important;
+  font-size: 1.6rem !important;
+  color: var(--ink) !important;
+  letter-spacing: -0.02em;
+}}
+[data-testid="stMetricDelta"] * {{ color: var(--ink-soft) !important; }}
+
+/* Captions */
+.stCaption, [data-testid="stCaptionContainer"], small {{
+  font-family: "Inter", sans-serif;
+  font-size: 0.82rem;
+  color: var(--ink-muted) !important;
+}}
+
+/* Expanders */
+[data-testid="stExpander"] {{ border: 1px solid var(--rule); border-radius: 4px; background: var(--card); }}
+[data-testid="stExpander"] summary, [data-testid="stExpander"] summary * {{ color: var(--ink) !important; font-weight: 500; }}
+[data-testid="stExpander"] details[open] > summary {{ border-bottom: 1px solid var(--rule); }}
+
+/* Code */
+code, pre, kbd {{
+  background: var(--paper-2) !important;
+  color: var(--ink) !important;
+  border-radius: 3px;
+  padding: 1px 6px;
+  font-family: "Inter", "SF Mono", ui-monospace, monospace;
+  font-feature-settings: "tnum";
+}}
+pre {{ padding: 12px 14px; }}
+
+/* Tooltip */
+[role="tooltip"] {{ background: var(--card) !important; color: var(--ink) !important; border: 1px solid var(--rule-soft) !important; }}
+
+/* Divider text on sliders */
+[data-testid="stSlider"] * {{ color: var(--ink) !important; }}
+
+/* FX result card (used on the FX Calculator page) */
+.fx-result-card {{
+  background: var(--fx-card-bg);
+  border: 1px solid var(--rule);
+  border-left: 3px solid var(--pink);
+  border-radius: 4px;
+  padding: 28px 32px;
+  margin-top: 8px;
+  box-shadow: var(--fx-card-shadow);
+}}
+.fx-result-label {{
+  font-family: "Inter", sans-serif;
+  font-size: 0.85rem;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--ink-soft);
+  margin-bottom: 10px;
+}}
+.fx-result-value {{
+  font-family: "Inter", sans-serif;
+  font-feature-settings: "tnum";
+  font-weight: 700;
+  font-size: 2.6rem;
+  color: var(--ink);
+  letter-spacing: -0.02em;
+  line-height: 1;
+}}
+.fx-result-sub {{
+  font-family: "Inter", sans-serif;
+  font-feature-settings: "tnum";
+  font-size: 0.85rem;
+  color: var(--ink-muted);
+  margin-top: 14px;
+  letter-spacing: 0;
+}}
+</style>
+"""
+
+
+_LIGHT_TOKENS = """
   --paper:   #fafaf7;
-  --paper-2: #f4f3ee;
-  --paper-3: #ebe9e1;
+  --paper-2: #f1efe9;
+  --paper-3: #e5e2d9;
   --card:    #ffffff;
-  --rule:      rgba(20, 16, 30, 0.08);
-  --rule-soft: rgba(20, 16, 30, 0.14);
+  --sidebar-bg: #ffffff;
+  --rule:      rgba(20, 16, 30, 0.10);
+  --rule-soft: rgba(20, 16, 30, 0.18);
   --ink:       #15121f;
   --ink-soft:  #3a3545;
   --ink-muted: #6c6478;
@@ -32,222 +314,60 @@ _LIGHT_CSS = """
   --cyan:   #0b8f7e;
   --up:     #0b8f7e;
   --down:   #c23b3b;
-  --glow:   0 2px 10px rgba(225, 29, 116, 0.22);
-}
-html, body, [data-testid="stAppViewContainer"] {
-  background: var(--paper) !important;
-  color: var(--ink);
-  font-family: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
-  letter-spacing: -0.005em;
-}
-#MainMenu, footer { visibility: hidden; }
-[data-testid="stHeader"] { background: transparent; }
-h1 { font-family: "Space Grotesk", sans-serif; font-weight: 600; font-size: clamp(2rem, 3.2vw, 2.6rem); letter-spacing: -0.03em; line-height: 1.05; color: var(--ink); margin: 12px 0 4px; }
-h1 em { font-style: normal; color: var(--pink); }
-h2 { font-family: "Space Grotesk", sans-serif; font-weight: 600; font-size: 1.3rem; letter-spacing: -0.015em; color: var(--ink); margin-top: 32px; }
-h3 { font-family: "JetBrains Mono", monospace; font-size: 0.68rem; font-weight: 600; letter-spacing: 0.18em; text-transform: uppercase; color: var(--ink-muted); margin-top: 24px; margin-bottom: 8px; }
-label, [data-testid="stWidgetLabel"] p {
-  font-family: "JetBrains Mono", monospace !important;
-  font-size: 0.66rem !important; font-weight: 500 !important;
-  letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-muted) !important;
-}
-[data-testid="stSidebar"] { background: var(--card); border-right: 1px solid var(--rule); }
-hr { border: 0; border-top: 1px solid var(--rule); margin: 32px 0; }
-.stButton > button, .stDownloadButton > button, [data-testid="stFormSubmitButton"] button {
-  font-family: "JetBrains Mono", monospace; font-weight: 600; font-size: 0.76rem;
-  letter-spacing: 0.14em; text-transform: uppercase;
-  border-radius: 2px; border: 1px solid var(--ink); background: var(--ink); color: var(--paper);
-  padding: 11px 18px; transition: background 160ms ease, transform 160ms ease, box-shadow 160ms ease;
-}
-.stButton > button:hover, [data-testid="stFormSubmitButton"] button:hover {
-  background: var(--pink); border-color: var(--pink); color: #fff;
-  transform: translateY(-1px); box-shadow: var(--glow);
-}
-input, textarea, [data-baseweb="input"] input { font-family: "Space Grotesk", sans-serif !important; background: var(--card) !important; border-radius: 2px !important; color: var(--ink) !important; }
-[data-testid="stNumberInput"] input { font-family: "JetBrains Mono", monospace !important; font-feature-settings: "tnum"; }
-.stTabs [data-baseweb="tab-list"] { gap: 2px; border-bottom: 1px solid var(--rule); }
-.stTabs [data-baseweb="tab"] {
-  font-family: "JetBrains Mono", monospace; font-weight: 500; font-size: 0.72rem;
-  letter-spacing: 0.14em; text-transform: uppercase;
-  color: var(--ink-muted); background: transparent; padding: 12px 16px;
-  border-radius: 0; border-bottom: 1px solid transparent; margin-bottom: -1px;
-}
-.stTabs [aria-selected="true"] { color: var(--ink) !important; border-bottom: 1px solid var(--ink) !important; background: transparent !important; }
-.stTabs [data-baseweb="tab-highlight"], .stTabs [data-baseweb="tab-border"] { display: none; }
-[data-testid="stDataFrame"], [data-testid="stDataEditor"] { border: 1px solid var(--rule); border-radius: 2px; background: var(--card); }
-[data-testid="stDataFrame"] [role="columnheader"], [data-testid="stDataEditor"] [role="columnheader"] {
-  font-family: "JetBrains Mono", monospace !important; font-size: 0.62rem !important; font-weight: 600 !important;
-  letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-muted) !important; background: var(--paper-2) !important;
-}
-[data-testid="stAlert"] { border-radius: 2px; border: 1px solid var(--rule); background: var(--card); }
-[data-testid="stAlert"][kind="success"] { background: color-mix(in oklab, var(--up) 6%, var(--card)); border-left: 2px solid var(--up); }
-[data-testid="stAlert"][kind="error"]   { background: color-mix(in oklab, var(--down) 6%, var(--card)); border-left: 2px solid var(--down); }
-[data-testid="stAlert"][kind="info"]    { background: var(--paper-2); border-left: 2px solid var(--pink); }
-[data-testid="stMetric"] {
-  background: var(--card); border: 1px solid var(--rule); border-left: 2px solid var(--pink);
-  border-radius: 2px; padding: 16px 24px;
-}
-[data-testid="stMetricLabel"] p {
-  font-family: "JetBrains Mono", monospace !important;
-  font-size: 0.62rem !important; letter-spacing: 0.18em; text-transform: uppercase;
-  color: var(--ink-muted) !important; font-weight: 500 !important;
-}
-[data-testid="stMetricValue"] {
-  font-family: "JetBrains Mono", monospace !important; font-feature-settings: "tnum";
-  font-weight: 500 !important; font-size: 1.5rem !important; color: var(--ink) !important;
-  letter-spacing: -0.02em;
-}
-.stCaption, [data-testid="stCaptionContainer"] {
-  font-family: "Space Grotesk", sans-serif; font-size: 0.8rem; color: var(--ink-muted);
-}
-.fx-result-card {
-  background: var(--card); border: 1px solid var(--rule); border-left: 2px solid var(--pink);
-  border-radius: 2px; padding: 28px 32px; margin-top: 8px;
-}
-.fx-result-label { font-family: "JetBrains Mono", monospace; font-size: 0.62rem; letter-spacing: 0.2em; text-transform: uppercase; color: var(--ink-muted); margin-bottom: 10px; }
-.fx-result-value { font-family: "JetBrains Mono", monospace; font-feature-settings: "tnum"; font-size: 2.6rem; color: var(--ink); letter-spacing: -0.02em; line-height: 1; }
-.fx-result-sub   { font-family: "JetBrains Mono", monospace; font-size: 0.72rem; color: var(--ink-muted); margin-top: 14px; letter-spacing: 0.04em; }
-</style>
+  --btn-bg: #15121f;
+  --btn-fg: #ffffff;
+  --btn-border: #15121f;
+  --tab-active-fg: #15121f;
+  --glow: 0 2px 10px rgba(225,29,116,0.22);
+  --metric-shadow: none;
+  --alert-success-bg: #ecf7f4;
+  --alert-error-bg:   #fbeeee;
+  --alert-info-bg:    #f5eef3;
+  --alert-warning-bg: #faf1e2;
+  --fx-card-bg: #ffffff;
+  --fx-card-shadow: none;
 """
 
-_DARK_CSS = """
-<style>
-@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
-:root {
-  --paper:   #07060d;
-  --paper-2: #0f0d1a;
-  --paper-3: #17152a;
-  --card:    #121022;
-  --rule:      rgba(255, 255, 255, 0.08);
-  --rule-soft: rgba(255, 255, 255, 0.16);
-  --ink:       #ece8f5;
-  --ink-soft:  #bab3cc;
-  --ink-muted: #7a7294;
-  --ink-faint: #5a536e;
-  --pink:   #ff2d8a;
-  --cyan:   #00f0ff;
-  --violet: #a06bff;
+
+# Dark Neon: near-black paper, light ink everywhere, pink + cyan accents.
+# Contrast is kept high; no large text depends on a glow to be readable.
+_DARK_TOKENS = """
+  --paper:   #0b0a12;
+  --paper-2: #17162a;
+  --paper-3: #22213a;
+  --card:    #16152a;
+  --sidebar-bg: #0f0e1c;
+  --rule:      rgba(255, 255, 255, 0.10);
+  --rule-soft: rgba(255, 255, 255, 0.22);
+  --ink:       #f4f2fb;
+  --ink-soft:  #c9c4dc;
+  --ink-muted: #9a94b0;
+  --ink-faint: #6e6885;
+  --pink:   #ff3d8f;
   --amber:  #ffb347;
-  --up:     #00ff9d;
-  --down:   #ff4569;
-  --glow:   0 0 18px rgba(255, 45, 138, 0.55), 0 0 2px rgba(255, 45, 138, 0.8);
-  --glow-cyan: 0 0 14px rgba(0, 240, 255, 0.45);
-}
-html, body, [data-testid="stAppViewContainer"] {
-  background: radial-gradient(ellipse at top left, #120f22 0%, var(--paper) 55%) !important;
-  color: var(--ink);
-  font-family: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
-  letter-spacing: -0.005em;
-}
-#MainMenu, footer { visibility: hidden; }
-[data-testid="stHeader"] { background: transparent; }
-h1 {
-  font-family: "Space Grotesk", sans-serif; font-weight: 600;
-  font-size: clamp(2rem, 3.2vw, 2.6rem); letter-spacing: -0.03em; line-height: 1.05;
-  color: var(--ink); margin: 12px 0 4px;
-}
-h1 em {
-  font-style: normal; color: var(--pink);
-  text-shadow: 0 0 18px rgba(255, 45, 138, 0.5), 0 0 2px rgba(255, 45, 138, 0.9);
-}
-h2 { font-family: "Space Grotesk", sans-serif; font-weight: 600; font-size: 1.3rem; letter-spacing: -0.015em; color: var(--ink); margin-top: 32px; }
-h3 { font-family: "JetBrains Mono", monospace; font-size: 0.68rem; font-weight: 600; letter-spacing: 0.18em; text-transform: uppercase; color: var(--cyan); margin-top: 24px; margin-bottom: 8px; text-shadow: 0 0 8px rgba(0, 240, 255, 0.25); }
-label, [data-testid="stWidgetLabel"] p {
-  font-family: "JetBrains Mono", monospace !important;
-  font-size: 0.66rem !important; font-weight: 500 !important;
-  letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-muted) !important;
-}
-[data-testid="stSidebar"] {
-  background: linear-gradient(180deg, #0d0b1a 0%, #07060d 100%);
-  border-right: 1px solid var(--rule);
-}
-hr { border: 0; border-top: 1px solid var(--rule); margin: 32px 0; }
-.stButton > button, .stDownloadButton > button, [data-testid="stFormSubmitButton"] button {
-  font-family: "JetBrains Mono", monospace; font-weight: 600; font-size: 0.76rem;
-  letter-spacing: 0.14em; text-transform: uppercase;
-  border-radius: 2px; border: 1px solid var(--pink); background: transparent; color: var(--pink);
-  padding: 11px 18px; transition: background 160ms ease, transform 160ms ease, box-shadow 160ms ease, color 160ms ease;
-  text-shadow: 0 0 6px rgba(255, 45, 138, 0.5);
-}
-.stButton > button:hover, [data-testid="stFormSubmitButton"] button:hover {
-  background: var(--pink); color: #0b0918;
-  transform: translateY(-1px); box-shadow: var(--glow);
-  text-shadow: none;
-}
-input, textarea, [data-baseweb="input"] input {
-  font-family: "Space Grotesk", sans-serif !important;
-  background: var(--card) !important; border-radius: 2px !important;
-  color: var(--ink) !important;
-}
-[data-baseweb="input"], [data-baseweb="select"] > div {
-  background: var(--card) !important; border-color: var(--rule-soft) !important;
-}
-[data-testid="stNumberInput"] input { font-family: "JetBrains Mono", monospace !important; font-feature-settings: "tnum"; }
-.stTabs [data-baseweb="tab-list"] { gap: 2px; border-bottom: 1px solid var(--rule); }
-.stTabs [data-baseweb="tab"] {
-  font-family: "JetBrains Mono", monospace; font-weight: 500; font-size: 0.72rem;
-  letter-spacing: 0.14em; text-transform: uppercase;
-  color: var(--ink-muted); background: transparent; padding: 12px 16px;
-  border-radius: 0; border-bottom: 1px solid transparent; margin-bottom: -1px;
-}
-.stTabs [aria-selected="true"] {
-  color: var(--cyan) !important;
-  border-bottom: 1px solid var(--cyan) !important;
-  background: transparent !important;
-  text-shadow: 0 0 8px rgba(0, 240, 255, 0.4);
-}
-.stTabs [data-baseweb="tab-highlight"], .stTabs [data-baseweb="tab-border"] { display: none; }
-[data-testid="stDataFrame"], [data-testid="stDataEditor"] {
-  border: 1px solid var(--rule); border-radius: 2px; background: var(--card);
-}
-[data-testid="stDataFrame"] [role="columnheader"], [data-testid="stDataEditor"] [role="columnheader"] {
-  font-family: "JetBrains Mono", monospace !important; font-size: 0.62rem !important; font-weight: 600 !important;
-  letter-spacing: 0.14em; text-transform: uppercase; color: var(--cyan) !important;
-  background: var(--paper-2) !important;
-}
-[data-testid="stAlert"] { border-radius: 2px; border: 1px solid var(--rule); background: var(--card); }
-[data-testid="stAlert"][kind="success"] { background: rgba(0, 255, 157, 0.06); border-left: 2px solid var(--up); }
-[data-testid="stAlert"][kind="error"]   { background: rgba(255, 69, 105, 0.06); border-left: 2px solid var(--down); }
-[data-testid="stAlert"][kind="info"]    { background: rgba(0, 240, 255, 0.05); border-left: 2px solid var(--cyan); }
-[data-testid="stMetric"] {
-  background: var(--card);
-  border: 1px solid var(--rule);
-  border-left: 2px solid var(--pink);
-  border-radius: 2px; padding: 16px 24px;
-  box-shadow: 0 0 0 1px rgba(255, 45, 138, 0.05), 0 0 20px rgba(255, 45, 138, 0.05);
-}
-[data-testid="stMetricLabel"] p {
-  font-family: "JetBrains Mono", monospace !important;
-  font-size: 0.62rem !important; letter-spacing: 0.18em; text-transform: uppercase;
-  color: var(--ink-muted) !important; font-weight: 500 !important;
-}
-[data-testid="stMetricValue"] {
-  font-family: "JetBrains Mono", monospace !important; font-feature-settings: "tnum";
-  font-weight: 500 !important; font-size: 1.5rem !important; color: var(--ink) !important;
-  letter-spacing: -0.02em;
-  text-shadow: 0 0 10px rgba(236, 232, 245, 0.12);
-}
-.stCaption, [data-testid="stCaptionContainer"] {
-  font-family: "Space Grotesk", sans-serif; font-size: 0.8rem; color: var(--ink-muted);
-}
-.fx-result-card {
-  background: linear-gradient(135deg, rgba(255,45,138,0.06) 0%, var(--card) 60%);
-  border: 1px solid var(--rule);
-  border-left: 2px solid var(--pink);
-  border-radius: 2px; padding: 28px 32px; margin-top: 8px;
-  box-shadow: 0 0 24px rgba(255, 45, 138, 0.10);
-}
-.fx-result-label { font-family: "JetBrains Mono", monospace; font-size: 0.62rem; letter-spacing: 0.2em; text-transform: uppercase; color: var(--cyan); margin-bottom: 10px; text-shadow: 0 0 6px rgba(0, 240, 255, 0.3); }
-.fx-result-value { font-family: "JetBrains Mono", monospace; font-feature-settings: "tnum"; font-size: 2.6rem; color: var(--ink); letter-spacing: -0.02em; line-height: 1; text-shadow: 0 0 16px rgba(255, 45, 138, 0.35); }
-.fx-result-sub   { font-family: "JetBrains Mono", monospace; font-size: 0.72rem; color: var(--ink-muted); margin-top: 14px; letter-spacing: 0.04em; }
-</style>
+  --violet: #b487ff;
+  --cyan:   #5cf0ff;
+  --up:     #5cf0a8;
+  --down:   #ff6b7f;
+  --btn-bg: transparent;
+  --btn-fg: #ff3d8f;
+  --btn-border: #ff3d8f;
+  --tab-active-fg: #5cf0ff;
+  --glow: 0 0 14px rgba(255, 61, 143, 0.45);
+  --metric-shadow: 0 0 0 1px rgba(255, 61, 143, 0.06);
+  --alert-success-bg: rgba(92, 240, 168, 0.07);
+  --alert-error-bg:   rgba(255, 107, 127, 0.08);
+  --alert-info-bg:    rgba(92, 240, 255, 0.06);
+  --alert-warning-bg: rgba(255, 179, 71, 0.07);
+  --fx-card-bg: linear-gradient(135deg, rgba(255,61,143,0.08) 0%, #16152a 55%);
+  --fx-card-shadow: 0 0 24px rgba(255, 61, 143, 0.10);
 """
 
 
 THEMES = {
     "light": {
-        "label": "Light · SwingScope",
-        "css": _LIGHT_CSS,
+        "label": "Light · Editorial",
+        "css": _BASE_CSS_TEMPLATE.format(tokens=_LIGHT_TOKENS),
         "plot": {
             "paper_bg": "#ffffff",
             "plot_bg":  "#ffffff",
@@ -262,17 +382,17 @@ THEMES = {
     },
     "dark": {
         "label": "Dark · Neon",
-        "css": _DARK_CSS,
+        "css": _BASE_CSS_TEMPLATE.format(tokens=_DARK_TOKENS),
         "plot": {
             "paper_bg": "rgba(0,0,0,0)",
             "plot_bg":  "rgba(0,0,0,0)",
-            "font_color": "#ece8f5",
-            "title_color": "#ff2d8a",
-            "grid_color": "rgba(255,255,255,0.06)",
-            "axis_line": "rgba(255,255,255,0.18)",
-            "palette":      ["#ff2d8a", "#00f0ff", "#a06bff", "#00ff9d", "#ffb347", "#ece8f5"],
-            "line_palette": ["#ff2d8a", "#00f0ff", "#00ff9d"],
-            "marker_edge": "#121022",
+            "font_color": "#f4f2fb",
+            "title_color": "#ff3d8f",
+            "grid_color": "rgba(255,255,255,0.10)",
+            "axis_line": "rgba(255,255,255,0.24)",
+            "palette":      ["#ff3d8f", "#5cf0ff", "#b487ff", "#5cf0a8", "#ffb347", "#f4f2fb"],
+            "line_palette": ["#ff3d8f", "#5cf0ff", "#5cf0a8"],
+            "marker_edge": "#16152a",
         },
     },
 }
@@ -288,9 +408,8 @@ def apply_theme(key_suffix: str = "global") -> str:
 
     with st.sidebar:
         st.markdown(
-            "<div style='font-family:\"JetBrains Mono\",monospace;font-size:0.62rem;"
-            "letter-spacing:0.2em;text-transform:uppercase;color:#8a8498;margin-bottom:6px;'>"
-            "Appearance</div>",
+            "<div style='font-size:0.78rem;font-weight:500;color:#6c6478;"
+            "margin-bottom:6px;'>Appearance</div>",
             unsafe_allow_html=True,
         )
         labels = [THEMES[k]["label"] for k in ("light", "dark")]
