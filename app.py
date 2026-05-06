@@ -303,109 +303,99 @@ usd_to_eur_rate = display_fx_rate if display_currency == "EUR" else FALLBACK_USD
 # --- Initialize DataFrames BEFORE loading ---
 # ... (initialization remains the same) ...
 components_df_try_loaded = None; product_recipe_df = None; fixed_df_usd_loaded = None
-product_weights_df = None; air_rates_df = None; pallets_df = None; product_packing_df = None # Added packing_df
-components_df = None; fixed_df = None; errors = []
+product_weights_df = None; air_rates_df = None; pallets_df = None; product_packing_df = None
+components_df = None; fixed_df = None
 
-# --- Load Data from CSV Files (with improved interest cost handling) ---
-# ... (load_csv function remains largely the same, validation improved slightly) ...
 def load_csv(file_path, required_cols, numeric_cols=None, decimal_char='.', string_cols=None):
-    global errors
+    """Load a CSV. Returns (dataframe, error_message_or_None)."""
     if not os.path.exists(file_path):
-        errors.append(f"File missing: '{os.path.abspath(file_path)}'")
-        return None
+        return None, f"File missing: '{os.path.abspath(file_path)}'"
     try:
         df = pd.read_csv(file_path, decimal=decimal_char)
         missing = [c for c in required_cols if c not in df.columns]
         if missing: raise ValueError(f"'{file_path}' missing required columns: {missing}")
 
-        # Basic check if dataframe is empty after loading
         if df.empty and required_cols:
             st.warning(f"Warning: File '{file_path}' loaded as empty. Check content and headers.")
-            # Optionally return empty dataframe with expected columns?
-            # return pd.DataFrame(columns=required_cols)
 
         if numeric_cols:
             for col in numeric_cols:
-                if col not in df.columns: continue # Skip if numeric col isn't present (might be optional)
+                if col not in df.columns: continue
 
-                # Special handling for Interest Cost row in fixed_costs.csv MonthlyCost
                 is_interest_cost_row = False
                 if file_path.endswith(FIXED_CSV) and col == 'MonthlyCost' and 'CostItem' in df.columns:
-                     # Ensure CostItem is string before comparison
                      df['CostItem'] = df['CostItem'].astype(str).fillna('')
                      is_interest_cost_row = df['CostItem'].str.strip().str.lower() == INTEREST_COST_ITEM_NAME.lower()
 
-                # Attempt conversion to numeric, coercing errors to NaN
-                original_type = df[col].dtype
                 df[col] = pd.to_numeric(df[col], errors='coerce')
 
-                # Check for NaNs *except* in the interest cost row for MonthlyCost
                 has_nan = df[col].isnull()
-                if isinstance(is_interest_cost_row, pd.Series): # Ensure it's a boolean Series
+                if isinstance(is_interest_cost_row, pd.Series):
                      rows_to_check_for_nan = has_nan & (~is_interest_cost_row)
-                else: # If not the special case, check all rows
+                else:
                      rows_to_check_for_nan = has_nan
 
                 if rows_to_check_for_nan.any():
-                    # Identify specific rows with errors if possible (more helpful message)
                     error_indices = df.index[rows_to_check_for_nan].tolist()
-                    raise ValueError(f"Column '{col}' in '{file_path}' contains non-numeric values or blanks at row indices (starting 0): {error_indices[:5]}...") # Show first few errors
+                    raise ValueError(f"Column '{col}' in '{file_path}' contains non-numeric values or blanks at row indices (starting 0): {error_indices[:5]}...")
 
         if string_cols:
             for col in string_cols:
                 if col in df.columns:
-                    df[col] = df[col].astype(str).fillna('').str.strip() # Convert, fill NA with empty string, strip whitespace
+                    df[col] = df[col].astype(str).fillna('').str.strip()
 
-        return df
+        return df, None
     except Exception as e:
-        errors.append(f"Error processing '{file_path}': {e}")
-        return None
+        return None, f"Error processing '{file_path}': {e}"
 
-try: # Load all data
-    components_df_try_loaded = load_csv(COMPONENTS_CSV, ['ComponentName', 'CostPerUnit', 'WeightKG'], ['CostPerUnit', 'WeightKG'])
-    product_recipe_df = load_csv(RECIPE_CSV, ['ProductID', 'ComponentName', 'QuantityPerProduct'], ['QuantityPerProduct'], string_cols=['ProductID', 'ComponentName']) # Ensure ComponentName is string
-    fixed_df_usd_loaded = load_csv(FIXED_CSV, ['CostItem', 'MonthlyCost', 'Category'], ['MonthlyCost'], string_cols=['Category','CostItem'])
-    product_weights_df = load_csv(WEIGHTS_CSV, ['ProductID', 'NetWeightKG'], ['NetWeightKG'], decimal_char=',', string_cols=['ProductID']) # Watch decimal char if issues arise
-    air_rates_df = load_csv(AIR_RATES_CSV, ['Destination', 'MinWeightKG', 'PricePerKG_USD', 'AirwayBill_USD'], ['MinWeightKG', 'PricePerKG_USD', 'AirwayBill_USD'])
-    pallets_df = load_csv(PALLETS_CSV, ['PalletType', 'CostUSD', 'WeightKG'], ['CostUSD', 'WeightKG'])
-    product_packing_df = load_csv(PACKING_CSV, ['ProductID', 'BoxesPerPallet'], ['BoxesPerPallet'], string_cols=['ProductID']) # Load packing data
+errors = []
+try:
+    components_df_try_loaded, err = load_csv(COMPONENTS_CSV, ['ComponentName', 'CostPerUnit', 'WeightKG'], ['CostPerUnit', 'WeightKG'])
+    if err: errors.append(err)
+    product_recipe_df, err = load_csv(RECIPE_CSV, ['ProductID', 'ComponentName', 'QuantityPerProduct'], ['QuantityPerProduct'], string_cols=['ProductID', 'ComponentName'])
+    if err: errors.append(err)
+    fixed_df_usd_loaded, err = load_csv(FIXED_CSV, ['CostItem', 'MonthlyCost', 'Category'], ['MonthlyCost'], string_cols=['Category','CostItem'])
+    if err: errors.append(err)
+    product_weights_df, err = load_csv(WEIGHTS_CSV, ['ProductID', 'NetWeightKG'], ['NetWeightKG'], decimal_char=',', string_cols=['ProductID'])
+    if err: errors.append(err)
+    air_rates_df, err = load_csv(AIR_RATES_CSV, ['Destination', 'MinWeightKG', 'PricePerKG_USD', 'AirwayBill_USD'], ['MinWeightKG', 'PricePerKG_USD', 'AirwayBill_USD'])
+    if err: errors.append(err)
+    pallets_df, err = load_csv(PALLETS_CSV, ['PalletType', 'CostUSD', 'WeightKG'], ['CostUSD', 'WeightKG'])
+    if err: errors.append(err)
+    product_packing_df, err = load_csv(PACKING_CSV, ['ProductID', 'BoxesPerPallet'], ['BoxesPerPallet'], string_cols=['ProductID'])
+    if err: errors.append(err)
 
-    # Explicitly convert BoxesPerPallet to numeric to avoid type issues
     if product_packing_df is not None:
         product_packing_df['BoxesPerPallet'] = pd.to_numeric(product_packing_df['BoxesPerPallet'], errors='coerce')
 
     if errors: raise ValueError("Errors occurred during file loading. See details above.")
 
-    # Process data only if loading succeeded
     components_df = components_df_try_loaded.copy()
     components_df['CostPerUnit_USD'] = components_df['CostPerUnit'] * exchange_rate
-    components_df['ComponentName'] = components_df['ComponentName'].astype(str).str.strip() # Ensure string type and stripped
+    components_df['ComponentName'] = components_df['ComponentName'].astype(str).str.strip()
 
     fixed_df = fixed_df_usd_loaded.copy()
     fixed_df = fixed_df.rename(columns={'MonthlyCost': 'MonthlyCost_USD'})
     fixed_df['Category'] = fixed_df['Category'].astype(str).str.strip().str.title()
-    fixed_df['CostItem'] = fixed_df['CostItem'].astype(str).str.strip() # Ensure string type and stripped
+    fixed_df['CostItem'] = fixed_df['CostItem'].astype(str).str.strip()
 
-    # Validate fixed cost categories
     valid_categories = ['Primary', 'Secondary']
     invalid_cats_df = fixed_df[~fixed_df['Category'].isin(valid_categories)]
     if not invalid_cats_df.empty:
         invalid_cats_list = invalid_cats_df['Category'].unique().tolist()
         errors.append(f"Invalid Category values in '{FIXED_CSV}': {invalid_cats_list}. Expected 'Primary' or 'Secondary'.")
 
-    # Ensure ProductIDs are string type for consistent merging/lookup across all relevant DFs
     if product_weights_df is not None: product_weights_df['ProductID'] = product_weights_df['ProductID'].astype(str)
     else: errors.append(f"'{WEIGHTS_CSV}' failed to load or is empty.")
     if product_recipe_df is not None: product_recipe_df['ProductID'] = product_recipe_df['ProductID'].astype(str)
     else: errors.append(f"'{RECIPE_CSV}' failed to load or is empty.")
     if product_packing_df is not None: product_packing_df['ProductID'] = product_packing_df['ProductID'].astype(str)
-    # No critical error if packing is missing, handled later
 
     if errors: raise ValueError("Errors occurred during data processing. See details above.")
 
 except Exception as e:
     st.error(" / ".join(errors) if errors else f"An unexpected error occurred during data loading/processing: {e}")
-    st.stop() # Stop execution if critical files/processing failed
+    st.stop()
 
 # --- Get unique lists ---
 # ... (logic remains the same) ...
