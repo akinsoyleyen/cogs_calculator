@@ -219,7 +219,6 @@ except Exception as e:
     st.stop()
 
 # --- Get unique lists ---
-# ... (logic remains the same) ...
 try:
     product_ids = sorted(product_weights_df['ProductID'].unique().tolist()) # Products must have weight defined
     air_destinations = sorted(air_rates_df['Destination'].unique().tolist()) if air_rates_df is not None else []
@@ -230,12 +229,10 @@ except Exception as e: st.error(f"Could not extract lists: {e}"); product_ids = 
 # --- Streamlit User Interface ---
 st.sidebar.header("Calculation Inputs")
 # Product Selection
-# ... (logic remains the same) ...
 if not product_ids: st.sidebar.warning("No products available."); selected_product = None
 else: selected_product = st.sidebar.selectbox("Select Product:", product_ids)
 
 # --- Quantity / Pallet Linking ---
-# ... (logic remains the same) ...
 st.sidebar.subheader("Quantity & Pallets")
 auto_calc_boxes = st.sidebar.checkbox("Calculate Box Quantity from Pallets?", value=False)
 
@@ -259,12 +256,10 @@ else:
      quantity_input = st.sidebar.number_input("Quantity (Boxes/Units):", min_value=1, value=100, step=1, disabled=False, help="Enter manually, or check box above to calculate from pallets.")
 
 # Pallet Type Selection
-# ... (logic remains the same) ...
 if not pallet_types: st.sidebar.warning("No pallet types loaded."); selected_pallet_type = "None"
 else: none_index = pallet_types.index("None") if "None" in pallet_types else 0; selected_pallet_type = st.sidebar.selectbox("Select Pallet Type:", pallet_types, index=none_index)
 
 # Raw Product Cost & Other Costs
-# ... (logic remains the same) ...
 st.sidebar.subheader("Costs") # Group remaining costs
 raw_cost_per_kg_try = st.sidebar.number_input("Raw Product Cost per KG (USD):", min_value=0.0, value=1.0, step=0.05, format="%.3f", help="Bare fruit cost per KG, in USD. One currency for everything.")
 
@@ -301,7 +296,6 @@ include_variable_costs = st.sidebar.checkbox("Include Variable Component Costs i
 
 
 # Logistics Inputs
-# ... (logic remains the same) ...
 st.sidebar.subheader("Logistics")
 shipment_types = ["Select...", "Air", "Container", "Truck"]; selected_shipment_type = st.sidebar.selectbox("Select Shipment Type:", shipment_types)
 selected_destination = None
@@ -437,7 +431,6 @@ if calculation_ready and st.sidebar.button("Calculate Costs"):
         final_shipping_gross_weight_kg = total_batch_gross_weight_boxes_only + total_pallet_weight_kg
 
         # --- 6. Logistics Costs (Freight/Fixed ONLY) ---
-        # ... (logic remains the same) ...
         freight_or_fixed_logistics_cost = 0.0; logistics_rate_per_kg = 0.0; awb_cost = 0.0; fixed_logistics_price = 0.0; logistics_cost_source = "N/A"
         if selected_shipment_type == "Air":
             if air_rates_df is not None and not air_rates_df.empty:
@@ -454,7 +447,6 @@ if calculation_ready and st.sidebar.button("Calculate Costs"):
         logistics_per_kg_gross_usd = total_logistics_cost_usd / final_shipping_gross_weight_kg if final_shipping_gross_weight_kg > 0 else 0
 
         # --- 7. Unexpected Cost ---
-        # ... (logic remains the same) ...
         total_unexpected_cost_usd = unexpected_cost_try * exchange_rate
         unexpected_cost_per_box_usd = total_unexpected_cost_usd / quantity_input if quantity_input > 0 else 0
 
@@ -484,7 +476,6 @@ if calculation_ready and st.sidebar.button("Calculate Costs"):
         cogs_per_box_usd = total_cogs_usd / quantity_input if quantity_input > 0 else 0; total_net_weight_kg = net_weight_kg * quantity_input; cogs_per_kg_usd = total_cogs_usd / total_net_weight_kg if total_net_weight_kg > 0 else 0
 
         # --- 11. Total Delivered Cost (Before Rebate) ---
-        # ... (logic remains the same) ...
         total_delivered_cost_usd = total_cogs_usd + total_logistics_cost_usd + total_unexpected_cost_usd
         delivered_cost_per_box_usd = total_delivered_cost_usd / quantity_input if quantity_input > 0 else 0
         delivered_cost_per_kg_net_usd = total_delivered_cost_usd / total_net_weight_kg if total_net_weight_kg > 0 else 0
@@ -506,22 +497,6 @@ if calculation_ready and st.sidebar.button("Calculate Costs"):
             'delivered_cost_per_box_usd': delivered_cost_per_box_usd
         }
 
-        # --- STORE RESULTS IN SESSION STATE ---
-        # Store values needed potentially by other pages (like Batch Sales, Profit Calc)
-        st.session_state['last_calc_product'] = selected_product_str
-        st.session_state['last_calc_quantity'] = quantity_input
-        st.session_state['cogs_per_box_usd'] = cogs_per_box_usd # COGS per box
-        st.session_state['unexpected_cost_per_box_usd'] = unexpected_cost_per_box_usd
-        st.session_state['calculated_gross_weight_kg_per_box'] = calculated_gross_weight_kg_per_box
-        st.session_state['air_rates_df'] = air_rates_df # Pass air rates table if needed elsewhere
-        st.session_state['selected_shipment_type'] = selected_shipment_type
-        st.session_state['delivered_cost_per_box_usd'] = delivered_cost_per_box_usd # Cost BEFORE rebate
-        # *** NEW: Store final cost per box including rebate ***
-        st.session_state['final_cost_per_box_usd'] = final_cost_per_box_usd # Cost AFTER rebate
-        st.session_state['last_calc_rebate_rate'] = rebate_percentage # Store rebate info too
-        st.session_state['last_calc_rebate_amount'] = rebate_amount_usd
-
-        # Update summary data dictionary to include rebate and final total
         summary_data = {
             "1. Raw Product": format_cost_by_mode(total_raw_cost_usd, currency_display_mode),
             "2. Variable Costs (incl. Pallets)": format_cost_by_mode(total_variable_costs_incl_pallets_usd, currency_display_mode),
@@ -539,24 +514,25 @@ if calculation_ready and st.sidebar.button("Calculate Costs"):
             f"6. Rebate/Fee ({rebate_percentage:.1f}%)": format_cost_by_mode(rebate_amount_usd, currency_display_mode),
             "Grand Total Cost (incl Rebate)": format_cost_by_mode(final_total_cost_usd, currency_display_mode)
         }
-        # Remove None values from summary (like zero interest) for cleaner display
-        st.session_state['summary_data'] = {k: v for k, v in summary_data.items() if v is not None}
 
+        # Persist results for use by other pages and tabs.
         st.session_state['calculation_done'] = True
-        st.session_state['last_calc_product'] = selected_product
+        st.session_state['summary_data'] = summary_data
+        st.session_state['last_calc_product'] = selected_product_str
         st.session_state['last_calc_quantity'] = quantity_input
         st.session_state['cogs_per_box_usd'] = cogs_per_box_usd
         st.session_state['unexpected_cost_per_box_usd'] = unexpected_cost_per_box_usd
         st.session_state['calculated_gross_weight_kg_per_box'] = calculated_gross_weight_kg_per_box
         st.session_state['air_rates_df'] = air_rates_df
         st.session_state['selected_shipment_type'] = selected_shipment_type
+        st.session_state['delivered_cost_per_box_usd'] = delivered_cost_per_box_usd
         st.session_state['final_cost_per_box_usd'] = final_cost_per_box_usd
+        st.session_state['last_calc_rebate_rate'] = rebate_percentage
+        st.session_state['last_calc_rebate_amount'] = rebate_amount_usd
         st.session_state['selected_pallet_type'] = selected_pallet_type
-        st.session_state['boxes_per_pallet'] = boxes_per_pallet if boxes_per_pallet > 0 else 1  # Always set, fallback to 1 if not valid
+        st.session_state['boxes_per_pallet'] = boxes_per_pallet if boxes_per_pallet > 0 else 1
         st.session_state['weight_per_pallet_kg'] = weight_per_pallet_kg
         st.session_state['num_pallets'] = num_pallets
-        # OVERWRITE THE CLEANED DICTIONARY WITH THE ORIGINAL ONE
-        st.session_state['summary_data'] = summary_data
 
     # --- Exception Handling for Main Calculation ---
     except ValueError as ve: calc_errors.append(f"Data Input Error: {ve}")
