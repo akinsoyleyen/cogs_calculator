@@ -12,18 +12,29 @@ import base64
 import numpy as np  # Add this import at the top for np.unique
 import plotly.graph_objects as go
 
+from theme import apply_theme, plot_style
+
 # --- Constants ---
-FALLBACK_TRY_TO_USD = 0.037  # Fallback rate if API fails
-FALLBACK_USD_TO_EUR = 0.85   # Fallback USD to EUR rate if API fails
 INTEREST_RATE = 0.05  # 5% interest rate
-INTEREST_COST_ITEM_NAME = "Calc. Interest"  # Name for calculated interest cost
+INTEREST_COST_ITEM_NAME = "Calc. Interest"
 
-# --- API URLs ---
-FRANKFURTER_API_URL = "https://api.frankfurter.app/latest?from=TRY&to=USD"
-FRANKFURTER_USD_EUR_API_URL = "https://api.frankfurter.app/latest?from=USD&to=EUR"
+# Everything in the app is stored and computed in USD. A single display FX is
+# applied at the end to convert results into any chosen reporting currency.
+DISPLAY_CURRENCIES = ["USD", "EUR", "GBP", "TRY", "CAD", "CHF", "JPY", "AED", "SGD", "AUD"]
+CURRENCY_SYMBOLS = {
+    "USD": "$", "EUR": "€", "GBP": "£", "TRY": "₺", "CAD": "C$",
+    "CHF": "CHF ", "JPY": "¥", "AED": "د.إ ", "SGD": "S$", "AUD": "A$"
+}
+FALLBACK_USD_RATES = {  # USD -> target, used when Frankfurter fails
+    "USD": 1.0, "EUR": 0.90, "GBP": 0.78, "TRY": 38.00, "CAD": 1.38,
+    "CHF": 0.90, "JPY": 148.0, "AED": 3.67, "SGD": 1.34, "AUD": 1.52
+}
 
-# --- Global variables ---
-usd_to_eur_rate = FALLBACK_USD_TO_EUR  # Initialize with fallback rate
+# Frankfurter supports a single base→target lookup
+FRANKFURTER_URL_TEMPLATE = "https://api.frankfurter.app/latest?from=USD&to={target}"
+
+# Legacy aliases (some code still reads these — kept for backward compatibility)
+exchange_rate = 1.0  # TRY rate no longer used; retained as a no-op multiplier
 
 # --- File Paths ---
 COMPONENTS_CSV = "components.csv"
@@ -35,81 +46,87 @@ PALLETS_CSV = "pallets.csv"
 PACKING_CSV = "product_packing.csv"
 
 # --- Streamlit Setup ---
-st.set_page_config(layout="wide", page_title="Cost Calculator")
+st.set_page_config(layout="wide", page_title="Ledger — Cost & Logistics", page_icon="◐")
 
-# --- Add Logo to Sidebar Here ---
+apply_theme("main")
+
+# --- Sidebar masthead ---
 with st.sidebar:
     try:
-        # Adjust the width as needed
-        st.image("assets/Logo.png", width=100)
+        st.image("assets/Logo.png", width=96)
     except FileNotFoundError:
-        st.error("Logo file not found. Make sure 'your_logo.png' is in the correct path.")
+        st.error("Logo file not found. Make sure 'Logo.png' is in assets/.")
     except Exception as e:
         st.error(f"An error occurred loading the logo: {e}")
+    st.markdown(
+        "<div style='font-family:\"Space Grotesk\",sans-serif;font-weight:600;"
+        "font-size:1.05rem;color:var(--ink);letter-spacing:-0.02em;margin-top:8px;'>"
+        "Ledger<span style='color:var(--pink)'>.</span></div>"
+        "<div style='font-family:\"JetBrains Mono\",monospace;font-size:0.62rem;color:var(--ink-muted);"
+        "letter-spacing:0.2em;text-transform:uppercase;margin-bottom:18px;'>Cost · Logistics · Margin</div>",
+        unsafe_allow_html=True,
+    )
 
-st.title("Product Cost & Logistics Calculator")
+# --- Masthead ---
+st.markdown(
+    "<div style='font-family:\"JetBrains Mono\",monospace;font-size:0.66rem;color:var(--ink-muted);"
+    "letter-spacing:0.24em;text-transform:uppercase;margin-bottom:-4px;'>"
+    "Landed · Cost · Calculator</div>",
+    unsafe_allow_html=True,
+)
+st.markdown(
+    "<h1 style='margin-top:4px'>Product Cost &amp; <em>Logistics</em> Calculator</h1>",
+    unsafe_allow_html=True,
+)
+st.markdown(
+    "<p style='font-family:\"Space Grotesk\",sans-serif;font-size:1rem;color:var(--ink-soft);"
+    "max-width:68ch;margin-top:-4px;margin-bottom:28px;line-height:1.55;'>"
+    "Everything in USD. One FX at the end — pick any currency you want to report in.</p>",
+    unsafe_allow_html=True,
+)
 
 # --- Exchange Rate Functions ---
 @st.cache_data(ttl=3600)
-def get_usd_to_eur_rate():
+def get_usd_to_target_rate(target_currency: str):
+    """Fetch live USD -> target rate from Frankfurter. Returns (rate, date|None)."""
+    if target_currency == "USD":
+        return 1.0, "native"
     try:
-        response = requests.get(FRANKFURTER_USD_EUR_API_URL, timeout=10)
+        response = requests.get(FRANKFURTER_URL_TEMPLATE.format(target=target_currency), timeout=10)
         response.raise_for_status()
         data = response.json()
-        rate = data.get('rates', {}).get('EUR')
-        date = data.get('date', 'N/A')
+        rate = data.get('rates', {}).get(target_currency)
+        date = data.get('date', None)
         if rate:
-            st.session_state['usd_eur_rate_source'] = f"API ({date})"
-            st.session_state['usd_eur_rate_date'] = date
-            return float(rate)
-        else:
-            st.session_state['usd_eur_rate_source'] = "API Error (Rate Missing)"
-            st.session_state['usd_eur_rate_date'] = None
-            return None
-    except Exception as e:
-        st.session_state['usd_eur_rate_source'] = f"API Failed ({type(e).__name__})"
-        st.session_state['usd_eur_rate_date'] = None
-        return None
+            return float(rate), date
+    except Exception:
+        pass
+    return None, None
 
-# --- Helper function to format costs with both USD and Euro ---
-def format_cost_usd_eur(usd_amount):
-    """Format a USD amount to show both USD and Euro values"""
-    if usd_amount == 0:
-        return "$0.00 / €0.00"
-    
-    # Get the current USD to EUR rate from sidebar
-    global usd_to_eur_rate
-    if usd_to_eur_rate is None:
-        usd_to_eur_rate = FALLBACK_USD_TO_EUR
-    
-    eur_amount = usd_amount * usd_to_eur_rate
-    return f"${usd_amount:,.2f} / €{eur_amount:,.2f}"
+# --- Display formatting ---
+# These three module-level variables are initialised further down, after the sidebar
+# lets the user pick a reporting currency. All intermediate math is in USD.
+display_currency = "USD"
+display_fx_rate = 1.0
+display_symbol = "$"
+
+def format_cost(usd_amount):
+    """Convert a USD amount to the chosen display currency and format it."""
+    if usd_amount is None:
+        return f"{display_symbol}0.00"
+    amt = float(usd_amount) * display_fx_rate
+    return f"{display_symbol}{amt:,.2f}"
+
+# Backward-compat shims — keep the old signatures so call sites don't have to change.
+def format_cost_by_mode(usd_amount, _mode_unused=None):
+    return format_cost(usd_amount)
 
 def format_cost_usd_only(usd_amount):
-    """Format a USD amount to show only USD values"""
-    if usd_amount == 0:
-        return "$0.00"
-    return f"${usd_amount:,.2f}"
+    return f"${0.0 if usd_amount is None else float(usd_amount):,.2f}"
 
 def format_cost_eur_only(usd_amount):
-    """Format a USD amount to show only EUR values"""
-    if usd_amount == 0:
-        return "€0.00"
-    
-    # Get the current USD to EUR rate from sidebar
-    global usd_to_eur_rate
-    if usd_to_eur_rate is None:
-        usd_to_eur_rate = FALLBACK_USD_TO_EUR
-    
-    eur_amount = usd_amount * usd_to_eur_rate
-    return f"€{eur_amount:,.2f}"
-
-def format_cost_by_mode(usd_amount, mode):
-    """Format cost based on display mode"""
-    if mode == "EUR Only":
-        return format_cost_eur_only(usd_amount)
-    else:  # USD Only (default)
-        return format_cost_usd_only(usd_amount)
+    # Retained for any external code paths; now returns the chosen display currency.
+    return format_cost(usd_amount)
 
 def calculate_profit_margins(cost_per_box, sales_price_per_box):
     """Calculate profit margins for given cost and sales price"""
@@ -151,8 +168,8 @@ def create_csv_export(summary_data_dict, profit_data, calculation_details):
     if profit_data:
         export_data.append(["Profit Analysis"])
         export_data.append(["Cost per Box (USD)", f"${profit_data.get('final_cost_per_box_usd', 0):,.2f}"])
-        export_data.append(["Cost per Box (EUR)", f"€{profit_data.get('final_cost_per_box_usd', 0) * usd_to_eur_rate:,.2f}"])
-    
+        export_data.append([f"Cost per Box ({display_currency})", format_cost(profit_data.get('final_cost_per_box_usd', 0))])
+
     return pd.DataFrame(export_data)
 
 def create_excel_export(summary_data_dict, profit_data, calculation_details, sensitivity_data):
@@ -189,7 +206,7 @@ def create_excel_export(summary_data_dict, profit_data, calculation_details, sen
         ws_profit.append([f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"])
         ws_profit.append([])
         ws_profit.append(["Cost per Box (USD)", f"${profit_data.get('final_cost_per_box_usd', 0):,.2f}"])
-        ws_profit.append(["Cost per Box (EUR)", f"€{profit_data.get('final_cost_per_box_usd', 0) * usd_to_eur_rate:,.2f}"])
+        ws_profit.append([f"Cost per Box ({display_currency})", format_cost(profit_data.get('final_cost_per_box_usd', 0))])
         
         # Add sensitivity analysis
         if sensitivity_data:
@@ -216,104 +233,72 @@ def get_download_link(data, filename, file_type):
         href = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="{filename}">Download Excel</a>'
     return href
 
-# --- Function to Fetch Exchange Rate ---
-# ... (function remains the same) ...
-@st.cache_data(ttl=3600)
-def get_try_to_usd_rate():
-    try:
-        response = requests.get(FRANKFURTER_API_URL, timeout=10)
-        response.raise_for_status()
-        data = response.json()
-        rate = data.get('rates', {}).get('USD')
-        date = data.get('date', 'N/A')
-        if rate:
-            st.session_state['rate_source'] = f"API ({date})"
-            st.session_state['rate_date'] = date
-            return float(rate)
-        else:
-            st.session_state['rate_source'] = "API Error (Rate Missing)"
-            st.session_state['rate_date'] = None
-            return None
-    except Exception as e:
-        st.session_state['rate_source'] = f"API Failed ({type(e).__name__})"
-        st.session_state['rate_date'] = None
-        return None
-
 # --- Initialize session state ---
-# ... (initialization remains the same) ...
-if 'rate_source' not in st.session_state: st.session_state['rate_source'] = "Not Fetched"
-if 'rate_date' not in st.session_state: st.session_state['rate_date'] = None
-# Add USD to EUR rate tracking
-if 'usd_eur_rate_source' not in st.session_state: st.session_state['usd_eur_rate_source'] = "Not Fetched"
-if 'usd_eur_rate_date' not in st.session_state: st.session_state['usd_eur_rate_date'] = None
-# Add defaults for values needed by other pages if not present
 if 'calculation_done' not in st.session_state: st.session_state['calculation_done'] = False
 if 'final_cost_per_box_usd' not in st.session_state: st.session_state['final_cost_per_box_usd'] = 0.0
 
 
-# --- Exchange Rate Handling (Includes Radio Button) ---
-# ... (logic remains the same) ...
-st.sidebar.subheader("Exchange Rate (TRY->USD)")
-rate_source_choice = st.sidebar.radio("Select Rate Source:", ("Automatic (Frankfurter API)", "Manual Input"), key="rate_choice", index=0)
-exchange_rate = None; manual_rate_input = None; rate_display_value = "N/A"; rate_display_source = "Not Set"
-if rate_source_choice == "Automatic (Frankfurter API)":
-    exchange_rate = get_try_to_usd_rate()
-    if exchange_rate is None: st.sidebar.warning(f"⚠️ API Failed ({st.session_state.get('rate_source', '?')}). Enter rate manually:"); manual_rate_input = st.sidebar.number_input("Enter TRY to USD Rate (Fallback):", min_value=0.0001, value=FALLBACK_TRY_TO_USD, step=0.0001, format="%.6f", key="manual_rate_fallback"); exchange_rate = manual_rate_input; rate_display_source = "Manual Fallback"; rate_display_value = f"{exchange_rate:.6f}" if exchange_rate is not None else "Error"
-    else: rate_display_source = st.session_state.get('rate_source', 'API'); rate_display_value = f"{exchange_rate:.6f}"; st.sidebar.success("Live rate fetched!")
-elif rate_source_choice == "Manual Input":
-    manual_rate_input = st.sidebar.number_input("Enter TRY to USD Rate Manually:", min_value=0.0001, value=FALLBACK_TRY_TO_USD, step=0.0001, format="%.6f", key="manual_rate_direct")
-    exchange_rate = manual_rate_input; rate_display_source = "Manual Input"; rate_display_value = f"{exchange_rate:.6f}" if exchange_rate is not None else "Error"
-if exchange_rate is None or not isinstance(exchange_rate, (int, float)) or exchange_rate <= 0: exchange_rate = FALLBACK_TRY_TO_USD; rate_display_source = "Fallback Default"; rate_display_value = f"{exchange_rate:.6f}"; st.sidebar.warning("Using default fallback rate.")
-st.sidebar.metric(label=f"TRY to USD Rate Used ({rate_display_source})", value=rate_display_value)
-
-# --- USD to EUR Exchange Rate Handling ---
-st.sidebar.subheader("Exchange Rate (USD->EUR)")
-
-usd_eur_rate_source_choice = st.sidebar.radio("Select USD->EUR Rate Source:", ("Automatic (Frankfurter API)", "Manual Input"), key="usd_eur_rate_choice", index=0)
-manual_usd_eur_rate_input = None; usd_eur_rate_display_value = "N/A"; usd_eur_rate_display_source = "Not Set"
-
-if usd_eur_rate_source_choice == "Automatic (Frankfurter API)":
-    usd_to_eur_rate = get_usd_to_eur_rate()
-    if usd_to_eur_rate is None: 
-        st.sidebar.warning(f"⚠️ API Failed ({st.session_state.get('usd_eur_rate_source', '?')}). Enter rate manually:")
-        manual_usd_eur_rate_input = st.sidebar.number_input("Enter USD to EUR Rate (Fallback):", min_value=0.0001, value=FALLBACK_USD_TO_EUR, step=0.0001, format="%.4f", key="manual_usd_eur_rate_fallback")
-        usd_to_eur_rate = manual_usd_eur_rate_input
-        usd_eur_rate_display_source = "Manual Fallback"
-        usd_eur_rate_display_value = f"{usd_to_eur_rate:.4f}" if usd_to_eur_rate is not None else "Error"
-    else: 
-        usd_eur_rate_display_source = st.session_state.get('usd_eur_rate_source', 'API')
-        usd_eur_rate_display_value = f"{usd_to_eur_rate:.4f}"
-        st.sidebar.success("Live USD->EUR rate fetched!")
-elif usd_eur_rate_source_choice == "Manual Input":
-    manual_usd_eur_rate_input = st.sidebar.number_input("Enter USD to EUR Rate Manually:", min_value=0.0001, value=FALLBACK_USD_TO_EUR, step=0.0001, format="%.4f", key="manual_usd_eur_rate_direct")
-    usd_to_eur_rate = manual_usd_eur_rate_input
-    usd_eur_rate_display_source = "Manual Input"
-    usd_eur_rate_display_value = f"{usd_to_eur_rate:.4f}" if usd_to_eur_rate is not None else "Error"
-
-if usd_to_eur_rate is None or not isinstance(usd_to_eur_rate, (int, float)) or usd_to_eur_rate <= 0: 
-    usd_to_eur_rate = FALLBACK_USD_TO_EUR
-    usd_eur_rate_display_source = "Fallback Default"
-    usd_eur_rate_display_value = f"{usd_to_eur_rate:.4f}"
-    st.sidebar.warning("Using default USD->EUR fallback rate.")
-
-st.sidebar.metric(label=f"USD to EUR Rate Used ({usd_eur_rate_display_source})", value=usd_eur_rate_display_value)
-
-# --- Rate Refresh Button ---
-col_refresh1, col_refresh2 = st.sidebar.columns(2)
-if col_refresh1.button("🔄 Refresh TRY->USD", help="Refresh TRY to USD exchange rate"):
-    st.cache_data.clear()
-    st.rerun()
-if col_refresh2.button("🔄 Refresh USD->EUR", help="Refresh USD to EUR exchange rate"):
-    st.cache_data.clear()
-    st.rerun()
-
-# --- Currency Display Toggle ---
-st.sidebar.subheader("Currency Display")
-currency_display_mode = st.sidebar.selectbox(
-    "Display Currency:",
-    ["USD Only", "EUR Only"],
-    help="Choose how to display costs in the results"
+# --- Display Currency (single FX at the end) ---
+st.sidebar.subheader("Reporting Currency")
+display_currency = st.sidebar.selectbox(
+    "Display results in:",
+    DISPLAY_CURRENCIES,
+    index=0,
+    help="All inputs are in USD. Pick any currency here to convert the final output — one rate, applied at the end."
 )
+display_symbol = CURRENCY_SYMBOLS.get(display_currency, display_currency + " ")
+
+fx_mode = st.sidebar.radio(
+    "FX rate source",
+    ("Live (Frankfurter API)", "Manual"),
+    key="fx_mode",
+    index=0,
+    disabled=(display_currency == "USD")
+)
+
+if display_currency == "USD":
+    display_fx_rate = 1.0
+    fx_source = "native"
+    fx_date = None
+elif fx_mode == "Live (Frankfurter API)":
+    live_rate, fx_date = get_usd_to_target_rate(display_currency)
+    if live_rate is not None:
+        display_fx_rate = live_rate
+        fx_source = f"API ({fx_date})"
+    else:
+        st.sidebar.warning(f"Live rate unavailable for USD→{display_currency}. Enter manually:")
+        display_fx_rate = st.sidebar.number_input(
+            f"USD→{display_currency} rate",
+            min_value=0.000001,
+            value=float(FALLBACK_USD_RATES.get(display_currency, 1.0)),
+            step=0.0001,
+            format="%.6f",
+            key=f"manual_fx_fallback_{display_currency}",
+        )
+        fx_source = "Manual fallback"
+else:
+    display_fx_rate = st.sidebar.number_input(
+        f"USD→{display_currency} rate",
+        min_value=0.000001,
+        value=float(FALLBACK_USD_RATES.get(display_currency, 1.0)),
+        step=0.0001,
+        format="%.6f",
+        key=f"manual_fx_{display_currency}",
+    )
+    fx_source = "Manual"
+
+st.sidebar.metric(
+    label=f"USD → {display_currency}  ({fx_source})",
+    value=f"{display_fx_rate:.4f}" if display_currency != "USD" else "1.0000",
+)
+
+if st.sidebar.button("Refresh live FX", help="Clear cache and re-fetch FX rates", disabled=(display_currency == "USD")):
+    st.cache_data.clear()
+    st.rerun()
+
+# Kept as aliases so legacy code paths still work
+currency_display_mode = f"{display_currency} Only"
+usd_to_eur_rate = display_fx_rate if display_currency == "EUR" else FALLBACK_USD_RATES["EUR"]
 
 
 # --- Initialize DataFrames BEFORE loading ---
@@ -457,9 +442,9 @@ if auto_calc_boxes and selected_product and product_packing_df is not None:
 num_pallets = st.sidebar.number_input("Number of Pallets:", min_value=0, value=1, step=1)
 
 if auto_calc_boxes and can_auto_calc:
-    calculated_boxes = num_pallets * boxes_per_pallet
+    calculated_boxes = int(max(1, num_pallets * boxes_per_pallet))
     quantity_input = st.sidebar.number_input( "Quantity (Boxes/Units):", min_value=1, value=calculated_boxes, step=1, disabled=True, help=f"Auto: {num_pallets} pallets * {boxes_per_pallet} boxes/pallet")
-    st.sidebar.caption(f"Using {boxes_per_pallet} Boxes/Pallet for {selected_product}")
+    st.sidebar.caption(f"Using {int(boxes_per_pallet)} Boxes/Pallet for {selected_product}")
 else:
      quantity_input = st.sidebar.number_input("Quantity (Boxes/Units):", min_value=1, value=100, step=1, disabled=False, help="Enter manually, or check box above to calculate from pallets.")
 
@@ -471,7 +456,7 @@ else: none_index = pallet_types.index("None") if "None" in pallet_types else 0; 
 # Raw Product Cost & Other Costs
 # ... (logic remains the same) ...
 st.sidebar.subheader("Costs") # Group remaining costs
-raw_cost_per_kg_try = st.sidebar.number_input("Raw Product Cost per KG (TRY):", min_value=0.0, value=50.0, step=0.1, format="%.2f")
+raw_cost_per_kg_try = st.sidebar.number_input("Raw Product Cost per KG (USD):", min_value=0.0, value=1.0, step=0.05, format="%.3f", help="Bare fruit cost per KG, in USD. One currency for everything.")
 
 # --- Show Fixed Cost Totals in Radio Options ---
 if fixed_df is not None:
@@ -501,7 +486,7 @@ else:
     fixed_cost_label_suffix = "(All)"
     fixed_cost_mode = "standard"
 
-unexpected_cost_try = st.sidebar.number_input("Unexpected Costs (Total TRY for Batch):", min_value=0.0, value=0.0, step=10.0, format="%.2f")
+unexpected_cost_try = st.sidebar.number_input("Unexpected Costs (USD for batch):", min_value=0.0, value=0.0, step=10.0, format="%.2f")
 include_variable_costs = st.sidebar.checkbox("Include Variable Component Costs in COGS?", value=True)
 
 
@@ -515,21 +500,17 @@ if selected_shipment_type == "Air":
     else: selected_destination = st.sidebar.selectbox("Select Destination (Air):", ["Select..."] + air_destinations) # Add select prompt
 
 manual_logistics_cost_usd = 0.0
+manual_logistics_cost_input = 0.0  # referenced in logistics-tab display block below
 if selected_shipment_type in ["Container", "Truck"]:
-    # Determine currency for display based on mode
-    logistics_currency = "EUR" if currency_display_mode == "EUR Only" else "USD"
     manual_logistics_cost_input = st.sidebar.number_input(
-        f"Enter Fixed {selected_shipment_type} Price ({logistics_currency}):",
+        f"Fixed {selected_shipment_type} Price (USD):",
         min_value=0.0,
         value=4000.0,
         step=50.0,
-        format="%.2f"
+        format="%.2f",
+        help="Enter the flat freight price in USD. The final output is converted to your reporting currency at the end.",
     )
-    # Convert EUR to USD if needed
-    if currency_display_mode == "EUR Only":
-        manual_logistics_cost_usd = manual_logistics_cost_input / usd_to_eur_rate
-    else:
-        manual_logistics_cost_usd = manual_logistics_cost_input
+    manual_logistics_cost_usd = manual_logistics_cost_input
 
 # *** NEW: Rebate Input ***
 st.sidebar.subheader("Sales Adjustments")
@@ -668,20 +649,26 @@ if calculation_ready and st.sidebar.button("Calculate Costs"):
         unexpected_cost_per_box_usd = total_unexpected_cost_usd / quantity_input if quantity_input > 0 else 0
 
         # --- 8. Fixed Costs (10% Option Calculated Here, after Logistics) ---
+        interest_base_cost = 0.0
         if fixed_cost_mode == "percent":
             total_value_for_percent = total_raw_cost_usd + total_variable_costs_incl_pallets_usd + total_logistics_cost_usd + total_unexpected_cost_usd
             fixed_cost_10_percent = total_value_for_percent * 0.10
-            # Interest is always calculated as 5% of (raw + variable + logistics + unexpected + fixed cost)
-            interest_base_cost = total_value_for_percent + fixed_cost_10_percent
-            interest_cost_usd = interest_base_cost * INTEREST_RATE
             total_allocated_fixed_cost_usd = fixed_cost_10_percent  # Only the 10% value, do not add interest here
         else:
             # Remove debug output for production
             standard_fixed_df = fixed_df[ (fixed_df['CostItem'].str.strip().str.lower() != INTEREST_COST_ITEM_NAME.lower()) & (fixed_df['Category'].isin(fixed_categories_to_include)) ]
             total_standard_fixed_cost_usd = standard_fixed_df['MonthlyCost_USD'].sum()
-            interest_base_cost = total_raw_cost_usd + total_variable_costs_incl_pallets_usd + total_standard_fixed_cost_usd + total_logistics_cost_usd + total_unexpected_cost_usd
-            interest_cost_usd = interest_base_cost * INTEREST_RATE
             total_allocated_fixed_cost_usd = total_standard_fixed_cost_usd
+
+        # Interest should account for the entire amount we pre-finance (raw, variable, fixed, logistics, unexpected)
+        interest_base_cost = (
+            total_raw_cost_usd
+            + total_variable_costs_incl_pallets_usd
+            + total_allocated_fixed_cost_usd
+            + total_logistics_cost_usd
+            + total_unexpected_cost_usd
+        )
+        interest_cost_usd = interest_base_cost * INTEREST_RATE
         fixed_cost_per_unit_usd = total_allocated_fixed_cost_usd / quantity_input if quantity_input > 0 else 0
         total_cogs_usd = total_raw_cost_usd + total_variable_costs_incl_pallets_usd + total_allocated_fixed_cost_usd + interest_cost_usd
         cogs_per_box_usd = total_cogs_usd / quantity_input if quantity_input > 0 else 0; total_net_weight_kg = net_weight_kg * quantity_input; cogs_per_kg_usd = total_cogs_usd / total_net_weight_kg if total_net_weight_kg > 0 else 0
@@ -774,7 +761,7 @@ if calculation_ready and st.sidebar.button("Calculate Costs"):
         for err in calc_errors: st.error(f"- {err}")
         st.session_state['calculation_done'] = False # Ensure flag is false on error
     elif st.session_state.get('calculation_done', False): # Proceed only if calculation was successful
-        st.header("Calculation Results (in USD)")
+        st.header(f"Calculation Results (in {display_currency})")
 
         # Update top display line to include rebate % if applicable
         display_destination = f" | Dest: `{selected_destination}`" if selected_shipment_type == "Air" else ""
@@ -816,12 +803,7 @@ if calculation_ready and st.sidebar.button("Calculate Costs"):
             st.subheader("Logistics Components (Total)");
             if selected_shipment_type == "Air": col4a, col4b = st.columns(2); freight_cost = final_shipping_gross_weight_kg * logistics_rate_per_kg; col4a.metric("Freight Cost", format_cost_by_mode(freight_cost, currency_display_mode), f"{final_shipping_gross_weight_kg:.2f}kg @ {format_cost_by_mode(logistics_rate_per_kg, currency_display_mode)}/kg"); col4b.metric("Airway Bill Cost", format_cost_by_mode(awb_cost, currency_display_mode))
             elif selected_shipment_type in ["Container", "Truck"]:
-                # For Container/Truck, show the price in the selected currency
-                if currency_display_mode == "EUR Only":
-                    fixed_price_display = manual_logistics_cost_input
-                else:
-                    fixed_price_display = fixed_logistics_price
-                st.metric(f"{selected_shipment_type} Fixed Price", format_cost_by_mode(fixed_price_display, currency_display_mode))
+                st.metric(f"{selected_shipment_type} Fixed Price", format_cost(fixed_logistics_price))
             else: st.write("N/A")
 
         # --- Total Delivered Cost Tab (Modified for Rebate) ---
@@ -860,10 +842,20 @@ if calculation_ready and st.sidebar.button("Calculate Costs"):
                 plot_data_filtered = {k: v for k, v in plot_data.items() if v > 0}
                 if plot_data_filtered:
                     plot_df = pd.DataFrame(list(plot_data_filtered.items()), columns=pd.Index(["Cost Category", "Total Cost (USD)"]))
+                    _ps = plot_style()
                     fig = px.pie(plot_df, names='Cost Category', values='Total Cost (USD)',
-                                 title='Cost Breakdown by Component (Before Rebate)', # Updated title
-                                 hole=.3)
-                    fig.update_traces(textposition='inside', textinfo='percent+label')
+                                 title='Cost breakdown by component (before rebate)',
+                                 hole=.58,
+                                 color_discrete_sequence=_ps["palette"])
+                    fig.update_traces(textposition='outside', textinfo='percent+label',
+                                      marker=dict(line=dict(color=_ps["marker_edge"], width=2)))
+                    fig.update_layout(
+                        paper_bgcolor=_ps["paper_bg"], plot_bgcolor=_ps["plot_bg"],
+                        font=dict(family="Space Grotesk, sans-serif", color=_ps["font_color"], size=13),
+                        title=dict(font=dict(family="Space Grotesk, sans-serif", size=16, color=_ps["title_color"]), x=0, xanchor="left"),
+                        legend=dict(font=dict(family="JetBrains Mono, monospace", size=11, color=_ps["font_color"])),
+                        margin=dict(l=10, r=10, t=60, b=10)
+                    )
                     st.plotly_chart(fig, use_container_width=True)
                 else: st.write("No primary cost components > 0 for chart.")
 
@@ -940,10 +932,21 @@ if calculation_ready and st.sidebar.button("Calculate Costs"):
 
                     # Add a graph for Cost Sensitivity Analysis
                     fig = go.Figure()
-                    fig.add_trace(go.Scatter(x=sensitivity_df['Markup %'], y=sensitivity_df['Profit per Box'].apply(lambda x: float(x.replace('$','').replace(',','').replace('€',''))), mode='lines+markers', name='Profit per Box'))
-                    fig.add_trace(go.Scatter(x=sensitivity_df['Markup %'], y=sensitivity_df['Profit Margin %'].apply(lambda x: float(x.replace('%',''))), mode='lines+markers', name='Profit Margin %'))
-                    fig.add_trace(go.Scatter(x=sensitivity_df['Markup %'], y=sensitivity_df['ROI %'].apply(lambda x: float(x.replace('%',''))), mode='lines+markers', name='ROI %'))
-                    fig.update_layout(title='Cost Sensitivity Analysis', xaxis_title='Markup %', yaxis_title='Value', legend_title='Metric')
+                    _ps = plot_style()
+                    _line_palette = _ps["line_palette"]
+                    def _coerce_num(s):
+                        return float(str(s).replace('$','').replace(',','').replace('€','').replace('£','').replace('₺','').replace('%','').replace('C$','').replace('A$','').replace('S$','').replace('CHF ','').replace('¥','').replace('د.إ ','').strip())
+                    fig.add_trace(go.Scatter(x=sensitivity_df['Markup %'], y=sensitivity_df['Profit per Box'].apply(_coerce_num), mode='lines+markers', name='Profit per Box', line=dict(color=_line_palette[0], width=2.2), marker=dict(size=7)))
+                    fig.add_trace(go.Scatter(x=sensitivity_df['Markup %'], y=sensitivity_df['Profit Margin %'].apply(_coerce_num), mode='lines+markers', name='Profit Margin %', line=dict(color=_line_palette[1], width=2.2), marker=dict(size=7)))
+                    fig.add_trace(go.Scatter(x=sensitivity_df['Markup %'], y=sensitivity_df['ROI %'].apply(_coerce_num), mode='lines+markers', name='ROI %', line=dict(color=_line_palette[2], width=2.2), marker=dict(size=7)))
+                    fig.update_layout(
+                        title=dict(text='Cost sensitivity', font=dict(family="Space Grotesk, sans-serif", size=16, color=_ps["title_color"]), x=0, xanchor="left"),
+                        xaxis=dict(title='Markup %', gridcolor=_ps["grid_color"], zerolinecolor=_ps["grid_color"], linecolor=_ps["axis_line"]),
+                        yaxis=dict(title='Value', gridcolor=_ps["grid_color"], zerolinecolor=_ps["grid_color"], linecolor=_ps["axis_line"]),
+                        paper_bgcolor=_ps["paper_bg"], plot_bgcolor=_ps["plot_bg"],
+                        font=dict(family="Space Grotesk, sans-serif", color=_ps["font_color"], size=13),
+                        legend=dict(font=dict(size=11, color=_ps["font_color"])), margin=dict(l=20, r=20, t=60, b=40)
+                    )
                     st.plotly_chart(fig, use_container_width=True)
                     
             else:
@@ -1081,7 +1084,7 @@ if 'cost_history' in st.session_state and st.session_state['cost_history']:
         st.rerun()
 
 # --- Input prompts if calculation isn't ready ---
-else:
+if not st.session_state.get('calculation_done', False):
     # Check specific conditions to give more targeted advice
     if not selected_product: st.warning("Select a product to begin.")
     elif quantity_input < 1: st.warning("Enter a valid Quantity (>= 1).")
