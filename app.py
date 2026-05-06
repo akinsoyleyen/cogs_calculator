@@ -37,8 +37,6 @@ from cogs.data_loader import (
     load_csv,
 )
 
-INTEREST_RATE = 0.05  # 5% interest rate
-
 exchange_rate = 1.0  # TRY rate no longer used; retained as a no-op multiplier
 
 # --- Streamlit Setup ---
@@ -143,6 +141,18 @@ st.sidebar.metric(
 if st.sidebar.button("Refresh live FX", help="Clear cache and re-fetch FX rates", disabled=(display_currency == "USD")):
     st.cache_data.clear()
     st.rerun()
+
+# --- Interest rate (sidebar input, not a constant) ---
+interest_rate_percent = st.sidebar.number_input(
+    "Interest Rate (%):",
+    min_value=0.0,
+    value=5.0,
+    step=0.1,
+    format="%.2f",
+    help="Applied on top of intermediate cost. Persists across pages via session state.",
+)
+interest_rate = interest_rate_percent / 100.0
+st.session_state["interest_rate_percent"] = interest_rate_percent
 
 # Push display state into session_state so cogs.formatters can read it.
 st.session_state["display_currency"] = display_currency
@@ -468,7 +478,7 @@ if calculation_ready and st.sidebar.button("Calculate Costs"):
             + total_logistics_cost_usd
             + total_unexpected_cost_usd
         )
-        interest_cost_usd = interest_base_cost * INTEREST_RATE
+        interest_cost_usd = interest_base_cost * interest_rate
         fixed_cost_per_unit_usd = total_allocated_fixed_cost_usd / quantity_input if quantity_input > 0 else 0
         total_cogs_usd = total_raw_cost_usd + total_variable_costs_incl_pallets_usd + total_allocated_fixed_cost_usd + interest_cost_usd
         cogs_per_box_usd = total_cogs_usd / quantity_input if quantity_input > 0 else 0; total_net_weight_kg = net_weight_kg * quantity_input; cogs_per_kg_usd = total_cogs_usd / total_net_weight_kg if total_net_weight_kg > 0 else 0
@@ -520,7 +530,7 @@ if calculation_ready and st.sidebar.button("Calculate Costs"):
                 if fixed_cost_mode == "percent"
                 else format_cost_by_mode(total_allocated_fixed_cost_usd, currency_display_mode)
             ),
-            f"   (Calc. Interest @ 5.0%)": format_cost_by_mode(interest_cost_usd, currency_display_mode),
+            f"   (Calc. Interest @ {interest_rate_percent:.1f}%)": format_cost_by_mode(interest_cost_usd, currency_display_mode),
             "   Subtotal COGS": format_cost_by_mode(total_cogs_usd, currency_display_mode),
             f"4. {selected_shipment_type} Freight/Fee": format_cost_by_mode(freight_or_fixed_logistics_cost, currency_display_mode),
             "   Subtotal Logistics": format_cost_by_mode(total_logistics_cost_usd, currency_display_mode),
