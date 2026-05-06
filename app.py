@@ -1,48 +1,45 @@
 import pandas as pd
 import streamlit as st
-import requests
 import os
 from datetime import datetime
 import plotly.express as px
-import io
-from openpyxl import Workbook
-from openpyxl.styles import Font, PatternFill, Alignment
-import base64
-import numpy as np  # Add this import at the top for np.unique
+import numpy as np
 import plotly.graph_objects as go
 
 from theme import apply_theme, plot_style
+from cogs.exchange import (
+    DISPLAY_CURRENCIES,
+    CURRENCY_SYMBOLS,
+    FALLBACK_USD_RATES,
+    get_usd_to_target_rate,
+)
+from cogs.formatters import (
+    format_cost,
+    format_cost_by_mode,
+    format_cost_usd_only,
+    format_cost_eur_only,
+)
+from cogs.exporters import (
+    calculate_profit_margins,
+    create_csv_export,
+    create_excel_export,
+    get_download_link,
+)
+from cogs.data_loader import (
+    COMPONENTS_CSV,
+    RECIPE_CSV,
+    FIXED_CSV,
+    WEIGHTS_CSV,
+    AIR_RATES_CSV,
+    PALLETS_CSV,
+    PACKING_CSV,
+    INTEREST_COST_ITEM_NAME,
+    load_csv,
+)
 
-# --- Constants ---
 INTEREST_RATE = 0.05  # 5% interest rate
-INTEREST_COST_ITEM_NAME = "Calc. Interest"
 
-# Everything in the app is stored and computed in USD. A single display FX is
-# applied at the end to convert results into any chosen reporting currency.
-DISPLAY_CURRENCIES = ["USD", "EUR", "GBP", "TRY", "CAD", "CHF", "JPY", "AED", "SGD", "AUD"]
-CURRENCY_SYMBOLS = {
-    "USD": "$", "EUR": "€", "GBP": "£", "TRY": "₺", "CAD": "C$",
-    "CHF": "CHF ", "JPY": "¥", "AED": "د.إ ", "SGD": "S$", "AUD": "A$"
-}
-FALLBACK_USD_RATES = {  # USD -> target, used when Frankfurter fails
-    "USD": 1.0, "EUR": 0.90, "GBP": 0.78, "TRY": 38.00, "CAD": 1.38,
-    "CHF": 0.90, "JPY": 148.0, "AED": 3.67, "SGD": 1.34, "AUD": 1.52
-}
-
-# Frankfurter supports a single base→target lookup
-FRANKFURTER_URL_TEMPLATE = "https://api.frankfurter.app/latest?from=USD&to={target}"
-
-# Legacy aliases (some code still reads these — kept for backward compatibility)
 exchange_rate = 1.0  # TRY rate no longer used; retained as a no-op multiplier
-
-# --- File Paths ---
-COMPONENTS_CSV = "components.csv"
-RECIPE_CSV = "product_recipe.csv"
-FIXED_CSV = "fixed_costs.csv"
-WEIGHTS_CSV = "product_weights.csv"
-AIR_RATES_CSV = "air_freight_rates.csv"
-PALLETS_CSV = "pallets.csv"
-PACKING_CSV = "product_packing.csv"
 
 # --- Streamlit Setup ---
 st.set_page_config(layout="wide", page_title="Ledger — Cost & Logistics", page_icon="◐")
@@ -83,154 +80,6 @@ st.markdown(
     "Everything in USD. One FX at the end — pick any currency you want to report in.</p>",
     unsafe_allow_html=True,
 )
-
-# --- Exchange Rate Functions ---
-@st.cache_data(ttl=3600)
-def get_usd_to_target_rate(target_currency: str):
-    """Fetch live USD -> target rate from Frankfurter. Returns (rate, date|None)."""
-    if target_currency == "USD":
-        return 1.0, "native"
-    try:
-        response = requests.get(FRANKFURTER_URL_TEMPLATE.format(target=target_currency), timeout=10)
-        response.raise_for_status()
-        data = response.json()
-        rate = data.get('rates', {}).get(target_currency)
-        date = data.get('date', None)
-        if rate:
-            return float(rate), date
-    except Exception:
-        pass
-    return None, None
-
-# --- Display formatting ---
-# These three module-level variables are initialised further down, after the sidebar
-# lets the user pick a reporting currency. All intermediate math is in USD.
-display_currency = "USD"
-display_fx_rate = 1.0
-display_symbol = "$"
-
-def format_cost(usd_amount):
-    """Convert a USD amount to the chosen display currency and format it."""
-    if usd_amount is None:
-        return f"{display_symbol}0.00"
-    amt = float(usd_amount) * display_fx_rate
-    return f"{display_symbol}{amt:,.2f}"
-
-# Backward-compat shims — keep the old signatures so call sites don't have to change.
-def format_cost_by_mode(usd_amount, _mode_unused=None):
-    return format_cost(usd_amount)
-
-def format_cost_usd_only(usd_amount):
-    return f"${0.0 if usd_amount is None else float(usd_amount):,.2f}"
-
-def format_cost_eur_only(usd_amount):
-    # Retained for any external code paths; now returns the chosen display currency.
-    return format_cost(usd_amount)
-
-def calculate_profit_margins(cost_per_box, sales_price_per_box):
-    """Calculate profit margins for given cost and sales price"""
-    if sales_price_per_box <= 0:
-        return {"profit_per_box": 0, "profit_margin_percent": 0, "roi_percent": 0}
-    
-    profit_per_box = sales_price_per_box - cost_per_box
-    profit_margin_percent = (profit_per_box / sales_price_per_box) * 100 if sales_price_per_box > 0 else 0
-    roi_percent = (profit_per_box / cost_per_box) * 100 if cost_per_box > 0 else 0
-    
-    return {
-        "profit_per_box": profit_per_box,
-        "profit_margin_percent": profit_margin_percent,
-        "roi_percent": roi_percent
-    }
-
-# --- Export Helper Functions ---
-def create_csv_export(summary_data_dict, profit_data, calculation_details):
-    """Create CSV export of calculation results"""
-    export_data = []
-    
-    # Add calculation details
-    export_data.append(["Calculation Details"])
-    export_data.append(["Date", datetime.now().strftime("%Y-%m-%d %H:%M:%S")])
-    export_data.append(["Product", calculation_details.get('product', 'N/A')])
-    export_data.append(["Quantity", calculation_details.get('quantity', 'N/A')])
-    export_data.append(["Shipment Type", calculation_details.get('shipment_type', 'N/A')])
-    export_data.append(["Fixed Cost Mode", calculation_details.get('fixed_cost_mode', 'N/A')])
-    export_data.append([])
-    
-    # Add cost breakdown
-    export_data.append(["Cost Breakdown"])
-    for key, value in summary_data_dict.items():
-        if value is not None:
-            export_data.append([key, value])
-    export_data.append([])
-    
-    # Add profit analysis if available
-    if profit_data:
-        export_data.append(["Profit Analysis"])
-        export_data.append(["Cost per Box (USD)", f"${profit_data.get('final_cost_per_box_usd', 0):,.2f}"])
-        export_data.append([f"Cost per Box ({display_currency})", format_cost(profit_data.get('final_cost_per_box_usd', 0))])
-
-    return pd.DataFrame(export_data)
-
-def create_excel_export(summary_data_dict, profit_data, calculation_details, sensitivity_data):
-    """Create Excel export with multiple sheets and formatting"""
-    wb = Workbook()
-    
-    # Remove default sheet
-    if wb.active is not None:
-        wb.remove(wb.active)
-    
-    # Summary sheet
-    ws_summary = wb.create_sheet("Cost Summary")
-    ws_summary.append(["Cost Calculator - Summary Report"])
-    ws_summary.append([f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"])
-    ws_summary.append([])
-    
-    # Add calculation details
-    ws_summary.append(["Calculation Details"])
-    ws_summary.append(["Product", calculation_details.get('product', 'N/A')])
-    ws_summary.append(["Quantity", calculation_details.get('quantity', 'N/A')])
-    ws_summary.append(["Shipment Type", calculation_details.get('shipment_type', 'N/A')])
-    ws_summary.append([])
-    
-    # Add cost breakdown
-    ws_summary.append(["Cost Breakdown"])
-    for key, value in summary_data_dict.items():
-        if value is not None:
-            ws_summary.append([key, value])
-    
-    # Profit Analysis sheet
-    if profit_data:
-        ws_profit = wb.create_sheet("Profit Analysis")
-        ws_profit.append(["Profit Analysis"])
-        ws_profit.append([f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"])
-        ws_profit.append([])
-        ws_profit.append(["Cost per Box (USD)", f"${profit_data.get('final_cost_per_box_usd', 0):,.2f}"])
-        ws_profit.append([f"Cost per Box ({display_currency})", format_cost(profit_data.get('final_cost_per_box_usd', 0))])
-        
-        # Add sensitivity analysis
-        if sensitivity_data:
-            ws_profit.append([])
-            ws_profit.append(["Sensitivity Analysis"])
-            headers = list(sensitivity_data[0].keys())
-            ws_profit.append(headers)
-            for row in sensitivity_data:
-                ws_profit.append([row[header] for header in headers])
-    
-    return wb
-
-def get_download_link(data, filename, file_type):
-    """Generate download link for files"""
-    if file_type == "csv":
-        csv = data.to_csv(index=False, header=False)
-        b64 = base64.b64encode(csv.encode()).decode()
-        href = f'<a href="data:file/csv;base64,{b64}" download="{filename}">Download CSV</a>'
-    elif file_type == "excel":
-        buffer = io.BytesIO()
-        data.save(buffer)
-        buffer.seek(0)
-        b64 = base64.b64encode(buffer.read()).decode()
-        href = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="{filename}">Download Excel</a>'
-    return href
 
 # --- Initialize session state ---
 if 'calculation_done' not in st.session_state: st.session_state['calculation_done'] = False
@@ -295,58 +144,20 @@ if st.sidebar.button("Refresh live FX", help="Clear cache and re-fetch FX rates"
     st.cache_data.clear()
     st.rerun()
 
+# Push display state into session_state so cogs.formatters can read it.
+st.session_state["display_currency"] = display_currency
+st.session_state["display_fx_rate"] = display_fx_rate
+st.session_state["display_symbol"] = display_symbol
+
 # Kept as aliases so legacy code paths still work
 currency_display_mode = f"{display_currency} Only"
 usd_to_eur_rate = display_fx_rate if display_currency == "EUR" else FALLBACK_USD_RATES["EUR"]
 
 
 # --- Initialize DataFrames BEFORE loading ---
-# ... (initialization remains the same) ...
 components_df_try_loaded = None; product_recipe_df = None; fixed_df_usd_loaded = None
 product_weights_df = None; air_rates_df = None; pallets_df = None; product_packing_df = None
 components_df = None; fixed_df = None
-
-def load_csv(file_path, required_cols, numeric_cols=None, decimal_char='.', string_cols=None):
-    """Load a CSV. Returns (dataframe, error_message_or_None)."""
-    if not os.path.exists(file_path):
-        return None, f"File missing: '{os.path.abspath(file_path)}'"
-    try:
-        df = pd.read_csv(file_path, decimal=decimal_char)
-        missing = [c for c in required_cols if c not in df.columns]
-        if missing: raise ValueError(f"'{file_path}' missing required columns: {missing}")
-
-        if df.empty and required_cols:
-            st.warning(f"Warning: File '{file_path}' loaded as empty. Check content and headers.")
-
-        if numeric_cols:
-            for col in numeric_cols:
-                if col not in df.columns: continue
-
-                is_interest_cost_row = False
-                if file_path.endswith(FIXED_CSV) and col == 'MonthlyCost' and 'CostItem' in df.columns:
-                     df['CostItem'] = df['CostItem'].astype(str).fillna('')
-                     is_interest_cost_row = df['CostItem'].str.strip().str.lower() == INTEREST_COST_ITEM_NAME.lower()
-
-                df[col] = pd.to_numeric(df[col], errors='coerce')
-
-                has_nan = df[col].isnull()
-                if isinstance(is_interest_cost_row, pd.Series):
-                     rows_to_check_for_nan = has_nan & (~is_interest_cost_row)
-                else:
-                     rows_to_check_for_nan = has_nan
-
-                if rows_to_check_for_nan.any():
-                    error_indices = df.index[rows_to_check_for_nan].tolist()
-                    raise ValueError(f"Column '{col}' in '{file_path}' contains non-numeric values or blanks at row indices (starting 0): {error_indices[:5]}...")
-
-        if string_cols:
-            for col in string_cols:
-                if col in df.columns:
-                    df[col] = df[col].astype(str).fillna('').str.strip()
-
-        return df, None
-    except Exception as e:
-        return None, f"Error processing '{file_path}': {e}"
 
 errors = []
 try:
