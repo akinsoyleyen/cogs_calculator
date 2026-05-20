@@ -87,6 +87,37 @@ if 'calculation_done' not in st.session_state: st.session_state['calculation_don
 if 'final_cost_per_box_usd' not in st.session_state: st.session_state['final_cost_per_box_usd'] = 0.0
 
 
+def _stat_row(items: list[tuple[str, str, str | None]]) -> None:
+    """Render N inline label/value cells as a compact stat row.
+
+    Each item is (label, value, hint). label = mono-uppercase top, value = bold
+    figure, hint = optional muted text under the value.
+    """
+    n = len(items) or 1
+    cells = []
+    for label, value, hint in items:
+        hint_html = (
+            f'<div style="font-size:0.75rem;color:var(--ink-muted);'
+            f'margin-top:2px;line-height:1.3;">{hint}</div>'
+            if hint else ""
+        )
+        cells.append(
+            '<div>'
+            '<div style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;'
+            'font-size:0.64rem;letter-spacing:0.16em;text-transform:uppercase;'
+            f'color:var(--ink-muted);margin-bottom:4px;">{label}</div>'
+            '<div style="font-family:Inter,sans-serif;font-feature-settings:\'tnum\';'
+            f'font-size:1.05rem;font-weight:600;color:var(--ink);line-height:1.2;">{value}</div>'
+            f'{hint_html}'
+            '</div>'
+        )
+    st.markdown(
+        f'<div style="display:grid;grid-template-columns:repeat({n},minmax(0,1fr));'
+        f'gap:18px;margin:6px 0 14px;">{"".join(cells)}</div>',
+        unsafe_allow_html=True,
+    )
+
+
 # --- Display Currency (single FX at the end) ---
 _sidebar_section("Reporting currency")
 display_currency = st.sidebar.selectbox(
@@ -97,53 +128,62 @@ display_currency = st.sidebar.selectbox(
 )
 display_symbol = CURRENCY_SYMBOLS.get(display_currency, display_currency + " ")
 
-fx_mode = st.sidebar.radio(
-    "FX rate source",
-    ("Live (Frankfurter API)", "Manual"),
-    key="fx_mode",
-    index=0,
-    disabled=(display_currency == "USD")
-)
-
+# For USD reporting, no FX widget needed — the entire chain stays USD-native.
 if display_currency == "USD":
     display_fx_rate = 1.0
     fx_source = "native"
     fx_date = None
-elif fx_mode == "Live (Frankfurter API)":
-    live_rate, fx_date = get_usd_to_target_rate(display_currency)
-    if live_rate is not None:
-        display_fx_rate = live_rate
-        fx_source = f"API ({fx_date})"
+    fx_live_success = False
+else:
+    fx_mode = st.sidebar.radio(
+        "FX rate source",
+        ("Live (Frankfurter API)", "Manual"),
+        key="fx_mode",
+        index=0,
+    )
+    fx_live_success = False
+    if fx_mode == "Live (Frankfurter API)":
+        live_rate, fx_date = get_usd_to_target_rate(display_currency)
+        if live_rate is not None:
+            display_fx_rate = live_rate
+            fx_source = f"live · {fx_date}"
+            fx_live_success = True
+        else:
+            st.sidebar.warning(
+                f"Live rate unavailable for USD→{display_currency}. Enter manually:"
+            )
+            display_fx_rate = st.sidebar.number_input(
+                f"USD→{display_currency} rate",
+                min_value=0.000001,
+                value=float(FALLBACK_USD_RATES.get(display_currency, 1.0)),
+                step=0.0001,
+                format="%.6f",
+                key=f"manual_fx_fallback_{display_currency}",
+            )
+            fx_source = "manual fallback"
     else:
-        st.sidebar.warning(f"Live rate unavailable for USD→{display_currency}. Enter manually:")
         display_fx_rate = st.sidebar.number_input(
             f"USD→{display_currency} rate",
             min_value=0.000001,
             value=float(FALLBACK_USD_RATES.get(display_currency, 1.0)),
             step=0.0001,
             format="%.6f",
-            key=f"manual_fx_fallback_{display_currency}",
+            key=f"manual_fx_{display_currency}",
         )
-        fx_source = "Manual fallback"
-else:
-    display_fx_rate = st.sidebar.number_input(
-        f"USD→{display_currency} rate",
-        min_value=0.000001,
-        value=float(FALLBACK_USD_RATES.get(display_currency, 1.0)),
-        step=0.0001,
-        format="%.6f",
-        key=f"manual_fx_{display_currency}",
-    )
-    fx_source = "Manual"
+        fx_source = "manual"
 
-st.sidebar.metric(
-    label=f"USD → {display_currency}  ({fx_source})",
-    value=f"{display_fx_rate:.4f}" if display_currency != "USD" else "1.0000",
-)
+    if fx_live_success:
+        st.sidebar.success(
+            f"USD → {display_currency} = {display_fx_rate:.4f}  ·  {fx_source}"
+        )
+    else:
+        st.sidebar.caption(
+            f"USD → {display_currency} = {display_fx_rate:.4f}  ·  {fx_source}"
+        )
 
-if st.sidebar.button("Refresh live FX", help="Clear cache and re-fetch FX rates", disabled=(display_currency == "USD")):
-    st.cache_data.clear()
-    st.rerun()
+    if st.sidebar.button("Refresh live FX", help="Clear cache and re-fetch FX rates"):
+        st.cache_data.clear()
+        st.rerun()
 
 # Push display state into session_state so cogs.formatters can read it.
 st.session_state["display_currency"] = display_currency
@@ -254,11 +294,9 @@ _sidebar_section("Costs")
 
 # Raw fruit is purchased in TRY → live-convert to USD for the calc.
 _usd_try_rate, _usd_try_date = get_usd_to_target_rate("TRY")
-if _usd_try_rate is None:
+_try_live_success = _usd_try_rate is not None
+if not _try_live_success:
     _usd_try_rate = float(FALLBACK_USD_RATES.get("TRY", 38.0))
-    _usd_try_source = "fallback"
-else:
-    _usd_try_source = f"live · {_usd_try_date}"
 
 _col_try, _col_usd = st.sidebar.columns(2)
 raw_cost_per_kg_try_input = _col_try.number_input(
@@ -277,7 +315,10 @@ _col_usd.number_input(
     format="%.4f",
     help="Auto-converted from TRY using the live Frankfurter rate.",
 )
-st.sidebar.caption(f"USD → TRY: {_usd_try_rate:.4f} ({_usd_try_source})")
+if _try_live_success:
+    st.sidebar.success(f"USD → TRY = {_usd_try_rate:.4f}  ·  live · {_usd_try_date}")
+else:
+    st.sidebar.caption(f"USD → TRY = {_usd_try_rate:.4f}  ·  fallback")
 
 # --- Show Fixed Cost Totals in Radio Options ---
 if fixed_df is not None:
@@ -309,11 +350,20 @@ else:
 
 # Logistics Inputs
 _sidebar_section("Logistics")
-shipment_types = ["Select...", "Air", "Container", "Truck"]; selected_shipment_type = st.sidebar.selectbox("Select Shipment Type:", shipment_types)
+shipment_types = ["Select...", "Air", "Container", "Truck"]
+selected_shipment_type = st.sidebar.selectbox("Select Shipment Type:", shipment_types)
+
+# Destination is auto-picked for Air (first alphabetically) — the matrix below
+# shows every destination, so a sidebar picker is redundant. Users can switch
+# the drill-in destination inline above the matrix.
 selected_destination = None
 if selected_shipment_type == "Air":
-    if not air_destinations: st.sidebar.warning("No air destinations loaded.")
-    else: selected_destination = st.sidebar.selectbox("Select Destination (Air):", ["Select..."] + air_destinations) # Add select prompt
+    if not air_destinations:
+        st.sidebar.warning("No air destinations loaded.")
+    else:
+        selected_destination = st.session_state.get("drill_destination", air_destinations[0])
+        if selected_destination not in air_destinations:
+            selected_destination = air_destinations[0]
 
 manual_logistics_cost_usd = 0.0
 manual_logistics_cost_input = 0.0  # referenced in logistics-tab display block below
@@ -370,12 +420,12 @@ st.session_state["interest_rate_percent"] = interest_rate_percent
 # --- Calculation Logic ---
 # ... (check remains the same) ...
 calculation_ready = (
-    selected_product is not None and
-    selected_pallet_type is not None and
-    fixed_cost_selection is not None and
-    selected_shipment_type != "Select..." and
-    (selected_shipment_type != "Air" or (selected_destination is not None and selected_destination != "Select...")) and
-    quantity_input >= 1
+    selected_product is not None
+    and selected_pallet_type is not None
+    and fixed_cost_selection is not None
+    and selected_shipment_type != "Select..."
+    and (selected_shipment_type != "Air" or selected_destination is not None)
+    and quantity_input >= 1
 )
 
 if calculation_ready and st.sidebar.button("Calculate Costs"):
@@ -550,63 +600,77 @@ if calculation_ready and st.sidebar.button("Calculate Costs"):
         ])
 
         with tab_cost:
-            # Top-line: three stat metrics — COGS / Logistics / Delivered+Rebate
-            top_a, top_b, top_c = st.columns(3)
-            top_a.metric("Total COGS", format_cost_by_mode(total_cogs_usd, currency_display_mode), help=f"Per box: {format_cost_by_mode(cogs_per_box_usd, currency_display_mode)} · per kg net: {format_cost_by_mode(cogs_per_kg_usd, currency_display_mode)}")
-            top_b.metric("Logistics", format_cost_by_mode(total_logistics_cost_usd, currency_display_mode), help=f"{logistics_cost_source} · per box: {format_cost_by_mode(logistics_per_box_usd, currency_display_mode)}")
-            top_c.metric("Delivered (incl. rebate)", format_cost_by_mode(final_total_cost_usd, currency_display_mode), help=f"Per box: {format_cost_by_mode(final_cost_per_box_usd, currency_display_mode)}")
-
-            st.markdown("---")
-
-            # COGS subsection
-            st.subheader(f"COGS {fixed_cost_label_suffix}")
-            col2a, col2b, col2c = st.columns(3)
-            col2a.metric("Raw Product", format_cost_by_mode(total_raw_cost_usd, currency_display_mode))
-            col2b.metric("Variable (incl. Pallets)", format_cost_by_mode(total_variable_costs_incl_pallets_usd, currency_display_mode), help="Only included if checkbox is checked. Pallet cost always included.")
-            col2c.metric(f"Fixed Costs {fixed_cost_label_suffix}", format_cost_by_mode(total_allocated_fixed_cost_usd, currency_display_mode), help=f"Includes Calc. Interest: {format_cost_by_mode(interest_cost_usd, currency_display_mode)}" if interest_cost_usd > 0 else None)
-            st.caption(
-                f"Per box — Raw: {format_cost_by_mode(raw_cost_per_box_usd, currency_display_mode)}"
-                f" · Variable: {format_cost_by_mode(variable_costs_incl_pallets_per_box_usd, currency_display_mode)}"
-                f" (Components {format_cost_by_mode(total_per_unit_variable_comp_cost_usd, currency_display_mode)}"
-                f" + Pallets {format_cost_by_mode(pallet_cost_per_box_usd, currency_display_mode)})"
-                f" · Fixed: {format_cost_by_mode(fixed_cost_per_unit_usd, currency_display_mode)}"
-                f" → COGS/box {format_cost_by_mode(cogs_per_box_usd, currency_display_mode)}"
+            fmt = lambda v: format_cost_by_mode(v, currency_display_mode)
+            final_cost_per_kg_net_usd = (
+                final_total_cost_usd / total_net_weight_kg if total_net_weight_kg > 0 else 0.0
             )
 
-            st.markdown("---")
+            # Top-line summary: batch totals + key per-box figure on each.
+            _stat_row([
+                ("Total COGS", fmt(total_cogs_usd), f"per box {fmt(cogs_per_box_usd)}"),
+                ("Logistics", fmt(total_logistics_cost_usd), f"per box {fmt(logistics_per_box_usd)}"),
+                ("Delivered (incl. rebate)", fmt(final_total_cost_usd), f"per box {fmt(final_cost_per_box_usd)}"),
+            ])
 
-            # Logistics subsection
-            st.subheader(f"{selected_shipment_type} logistics — {logistics_cost_source}")
+            # COGS breakdown — per-batch totals with per-box figures inline.
+            st.markdown(
+                f"<h4 style='margin:18px 0 0;'>COGS <span style='color:var(--ink-muted);"
+                f"font-weight:500;font-size:0.9rem;'>· {fixed_cost_label_suffix.strip('()')}</span></h4>",
+                unsafe_allow_html=True,
+            )
+            _stat_row([
+                ("Raw product", fmt(total_raw_cost_usd), f"per box {fmt(raw_cost_per_box_usd)}"),
+                ("Variable (incl. pallets)", fmt(total_variable_costs_incl_pallets_usd),
+                    f"components {fmt(total_per_unit_variable_comp_cost_usd)} + pallets {fmt(pallet_cost_per_box_usd)} /box"),
+                (f"Fixed {fixed_cost_label_suffix.strip('()')}", fmt(total_allocated_fixed_cost_usd),
+                    f"interest {fmt(interest_cost_usd)} · per box {fmt(fixed_cost_per_unit_usd)}"),
+            ])
+
+            # Logistics breakdown.
+            st.markdown(
+                f"<h4 style='margin:18px 0 0;'>{selected_shipment_type} logistics "
+                f"<span style='color:var(--ink-muted);font-weight:500;font-size:0.9rem;'>"
+                f"· {logistics_cost_source}</span></h4>",
+                unsafe_allow_html=True,
+            )
             if selected_shipment_type == "Air":
-                col4a, col4b = st.columns(2)
                 freight_cost = final_shipping_gross_weight_kg * logistics_rate_per_kg
-                col4a.metric("Freight", format_cost_by_mode(freight_cost, currency_display_mode), f"{final_shipping_gross_weight_kg:.2f} kg @ {format_cost_by_mode(logistics_rate_per_kg, currency_display_mode)}/kg")
-                col4b.metric("Airway Bill", format_cost_by_mode(awb_cost, currency_display_mode))
+                _stat_row([
+                    ("Freight", fmt(freight_cost),
+                        f"{final_shipping_gross_weight_kg:.2f} kg @ {fmt(logistics_rate_per_kg)}/kg"),
+                    ("Airway bill", fmt(awb_cost), None),
+                    ("Per box · per kg gross",
+                        f"{fmt(logistics_per_box_usd)} / {fmt(logistics_per_kg_gross_usd)}",
+                        None),
+                ])
             elif selected_shipment_type in ("Container", "Truck"):
-                st.metric(f"{selected_shipment_type} Fixed Price", format_cost(fixed_logistics_price))
+                _stat_row([
+                    (f"{selected_shipment_type} fixed price", fmt(fixed_logistics_price), None),
+                    ("Per box", fmt(logistics_per_box_usd), None),
+                ])
             else:
                 st.write("N/A")
-            if final_shipping_gross_weight_kg > 0:
-                st.caption(f"Per box: {format_cost_by_mode(logistics_per_box_usd, currency_display_mode)} · Per kg gross: {format_cost_by_mode(logistics_per_kg_gross_usd, currency_display_mode)}")
 
-            st.markdown("---")
-
-            # Delivered + Rebate subsection
-            st.subheader(f"Delivered cost · rebate {rebate_percentage:.1f}%")
-            col_d1, col_d2, col_d3 = st.columns(3)
-            col_d1.metric("Before rebate", format_cost_by_mode(total_delivered_cost_usd, currency_display_mode))
-            col_d2.metric("Rebate amount", format_cost_by_mode(rebate_amount_usd, currency_display_mode))
-            col_d3.metric("After rebate", format_cost_by_mode(final_total_cost_usd, currency_display_mode))
-            per_box_kg_caption = f"Per box: {format_cost_by_mode(final_cost_per_box_usd, currency_display_mode)}"
-            if total_net_weight_kg > 0:
-                final_cost_per_kg_net_usd = final_total_cost_usd / total_net_weight_kg
-                per_box_kg_caption += f" · Per kg net: {format_cost_by_mode(final_cost_per_kg_net_usd, currency_display_mode)}"
-            st.caption(per_box_kg_caption)
+            # Delivered + rebate breakdown.
+            st.markdown(
+                f"<h4 style='margin:18px 0 0;'>Delivered "
+                f"<span style='color:var(--ink-muted);font-weight:500;font-size:0.9rem;'>"
+                f"· rebate {rebate_percentage:.1f}%</span></h4>",
+                unsafe_allow_html=True,
+            )
+            _stat_row([
+                ("Before rebate", fmt(total_delivered_cost_usd), None),
+                ("Rebate amount", fmt(rebate_amount_usd), None),
+                ("After rebate · per box",
+                    f"{fmt(final_total_cost_usd)} / {fmt(final_cost_per_box_usd)}",
+                    f"per kg net {fmt(final_cost_per_kg_net_usd)}" if total_net_weight_kg > 0 else None),
+            ])
             st.caption(
-                f"= {format_cost_by_mode(total_cogs_usd, currency_display_mode)} (COGS) "
-                f"+ {format_cost_by_mode(total_logistics_cost_usd, currency_display_mode)} (Logistics) "
-                f"+ {format_cost_by_mode(total_unexpected_cost_usd, currency_display_mode)} (Unexpected) "
-                f"+ {format_cost_by_mode(rebate_amount_usd, currency_display_mode)} (Rebate)"
+                f"{fmt(total_cogs_usd)} (COGS) + "
+                f"{fmt(total_logistics_cost_usd)} (Logistics) + "
+                f"{fmt(total_unexpected_cost_usd)} (Unexpected) + "
+                f"{fmt(rebate_amount_usd)} (Rebate) = "
+                f"{fmt(final_total_cost_usd)}"
             )
 
         # --- Detail tab (former Batch Summary Detail) ---
@@ -1061,7 +1125,7 @@ if not st.session_state.get('calculation_done', False):
     if not selected_product: st.warning("Select a product to begin.")
     elif quantity_input < 1: st.warning("Enter a valid Quantity (>= 1).")
     elif selected_shipment_type == "Select...": st.warning("Select a shipment type.")
-    elif selected_shipment_type == "Air" and (selected_destination is None or selected_destination == "Select..."): st.warning("Select a destination for Air shipment.")
+    elif selected_shipment_type == "Air" and not selected_destination: st.warning("No air destinations loaded — check air_freight_rates.csv.")
     elif selected_pallet_type is None: st.warning("Select a pallet type (use 'None' if no pallets).")
     else: st.info("Adjust inputs in the sidebar and click 'Calculate Costs'.") # Default message
 
