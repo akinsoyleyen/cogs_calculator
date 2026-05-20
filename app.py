@@ -428,7 +428,10 @@ calculation_ready = (
     and quantity_input >= 1
 )
 
-if calculation_ready and st.sidebar.button("Calculate Costs"):
+if calculation_ready and (
+    st.sidebar.button("Calculate Costs")
+    or st.session_state.get('calculation_done', False)
+):
 
     selected_product_str = str(selected_product)
     calc_errors = []
@@ -604,6 +607,19 @@ if calculation_ready and st.sidebar.button("Calculate Costs"):
             final_cost_per_kg_net_usd = (
                 final_total_cost_usd / total_net_weight_kg if total_net_weight_kg > 0 else 0.0
             )
+
+            if selected_shipment_type == "Air" and air_destinations:
+                _dest_index = (
+                    air_destinations.index(selected_destination)
+                    if selected_destination in air_destinations else 0
+                )
+                st.selectbox(
+                    "Logistics & delivered breakdown for:",
+                    air_destinations,
+                    index=_dest_index,
+                    key="drill_destination",
+                    help="The matrix below shows every destination. Pick one here to drill into the per-batch breakdown.",
+                )
 
             # Top-line summary: batch totals + key per-box figure on each.
             _stat_row([
@@ -1061,6 +1077,42 @@ if st.session_state.get('calculation_done', False) and selected_shipment_type ==
                             )
                     except requests.RequestException as e:
                         st.error(f"Request failed: {e}")
+
+        # --- Bottom-line: delivered per box across destinations ---
+        st.markdown("---")
+        _summary_df = sell_matrix_df if _matrix_is_sell else cost_matrix_df
+        _summary_label = "Sell price per box" if _matrix_is_sell else "Delivered cost per box"
+        # Collapse pallet-count columns into a per-destination summary using
+        # the largest pallet count (typically the cheapest per-box rate).
+        _max_p_col = max(_summary_df.columns)
+        _per_dest = _summary_df[_max_p_col].astype(float).sort_values()
+        _cheapest_dest, _cheapest_val = _per_dest.index[0], float(_per_dest.iloc[0])
+        _priciest_dest, _priciest_val = _per_dest.index[-1], float(_per_dest.iloc[-1])
+        st.markdown(
+            "<div style='border:1px solid var(--rule);background:var(--card);"
+            "border-radius:6px;padding:18px 22px;margin-top:6px;'>"
+            "<div style='font-family:ui-monospace,SFMono-Regular,Menlo,monospace;"
+            "font-size:0.68rem;letter-spacing:0.16em;text-transform:uppercase;"
+            f"color:var(--ink-muted);margin-bottom:6px;'>{_summary_label} · {int(_max_p_col)} pallets</div>"
+            "<div style='display:grid;grid-template-columns:1fr 1fr;gap:24px;'>"
+            "<div>"
+            "<div style='font-family:Inter,sans-serif;font-feature-settings:\"tnum\";"
+            f"font-size:1.6rem;font-weight:600;color:var(--up);line-height:1.15;'>${_cheapest_val:,.2f}</div>"
+            f"<div style='font-size:0.85rem;color:var(--ink-muted);margin-top:4px;'>cheapest · {_cheapest_dest}</div>"
+            "</div>"
+            "<div>"
+            "<div style='font-family:Inter,sans-serif;font-feature-settings:\"tnum\";"
+            f"font-size:1.6rem;font-weight:600;color:var(--down);line-height:1.15;'>${_priciest_val:,.2f}</div>"
+            f"<div style='font-size:0.85rem;color:var(--ink-muted);margin-top:4px;'>most expensive · {_priciest_dest}</div>"
+            "</div>"
+            "</div>"
+            f"<div style='font-size:0.8rem;color:var(--ink-muted);margin-top:12px;'>"
+            f"Range across {len(_per_dest)} destinations"
+            + (f" · target profit {target_profit_percent:.1f}%" if _matrix_is_sell else "")
+            + "</div>"
+            "</div>",
+            unsafe_allow_html=True,
+        )
     except ValueError as e:
         st.warning(str(e))
     except Exception as e:
