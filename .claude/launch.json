@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "Streamlit — Cost Calculator",
+      "runtimeExecutable": "/Volumes/Crucial X8/App Projects/cogs_calculator/.venv/bin/streamlit",
+      "runtimeArgs": ["run", "app.py"],
+      "port": 8501
+    }
+  ]
+}

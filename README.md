@@ -45,7 +45,19 @@ The interest-rate input (default 5%) is added on top of intermediate cost. Rebat
 
 ## Streamlit Cloud secrets
 
-Currently no secrets are required — the app uses only the public Frankfurter API for FX. If a future page needs API keys or webhook URLs, configure them via the Streamlit Cloud Secrets panel (Project Settings → Secrets) and read with `st.secrets["key_name"]`. Locally, place a `.streamlit/secrets.toml` (gitignored) with the same keys.
+FX rates use the public Frankfurter API and need no secrets.
+
+The **Push matrix to Google Sheets** feature does — it writes a cost-per-box matrix (11 destinations × {2, 4, 6, 10} pallets) to a sheet you own. Setup:
+
+1. In Google Cloud Console, create or pick a project and enable the **Sheets API** and **Drive API**.
+2. Create a service account; download its JSON key.
+3. Create the destination Google Sheet (or reuse one). Share it with the service-account email (`...@...iam.gserviceaccount.com`) with **Editor** permission.
+4. Copy `.streamlit/secrets.toml.example` to `.streamlit/secrets.toml` and fill in:
+   - `sheet_url` — the full URL of the sheet
+   - `[gcp_service_account]` — paste in the service-account JSON, key-for-key
+5. Locally: `secrets.toml` lives under `.streamlit/` and is gitignored. On Streamlit Cloud, paste the same keys under Project Settings → Secrets.
+
+Each push appends a timestamped block (metadata header + the matrix) to a worksheet called `COGS Matrix`. Old blocks are preserved; runs grow downwards.
 
 ## Modernization plan
 

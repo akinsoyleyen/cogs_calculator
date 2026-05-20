@@ -36,6 +36,7 @@ from cogs.data_loader import (
     INTEREST_COST_ITEM_NAME,
     load_csv,
 )
+from cogs.calculator import compute_landed_cost
 
 exchange_rate = 1.0  # TRY rate no longer used; retained as a no-op multiplier
 
@@ -63,21 +64,23 @@ with st.sidebar:
 
 # --- Masthead ---
 st.markdown(
-    "<div style='font-family:\"JetBrains Mono\",monospace;font-size:0.66rem;color:var(--ink-muted);"
-    "letter-spacing:0.24em;text-transform:uppercase;margin-bottom:-4px;'>"
-    "Landed · Cost · Calculator</div>",
+    "<h1 style='margin:6px 0 6px'>Cost &amp; <em>Logistics</em> Calculator</h1>"
+    "<p style='font-size:0.92rem;color:var(--ink-muted);max-width:62ch;"
+    "margin:0 0 24px;line-height:1.5;'>"
+    "Everything in USD. One FX conversion at the end.</p>",
     unsafe_allow_html=True,
 )
-st.markdown(
-    "<h1 style='margin-top:4px'>Product Cost &amp; <em>Logistics</em> Calculator</h1>",
-    unsafe_allow_html=True,
-)
-st.markdown(
-    "<p style='font-family:\"Space Grotesk\",sans-serif;font-size:1rem;color:var(--ink-soft);"
-    "max-width:68ch;margin-top:-4px;margin-bottom:28px;line-height:1.55;'>"
-    "Everything in USD. One FX at the end — pick any currency you want to report in.</p>",
-    unsafe_allow_html=True,
-)
+
+
+def _sidebar_section(label: str) -> None:
+    """Mono-uppercase mini-label with a soft divider above. Replaces st.subheader in the sidebar."""
+    st.sidebar.markdown(
+        "<div style='border-top:1px solid var(--rule);margin:14px 0 10px;'></div>"
+        f"<div style='font-family:ui-monospace,SFMono-Regular,Menlo,monospace;"
+        "font-size:0.68rem;letter-spacing:0.16em;text-transform:uppercase;"
+        f"color:var(--ink-muted);margin-bottom:6px;'>{label}</div>",
+        unsafe_allow_html=True,
+    )
 
 # --- Initialize session state ---
 if 'calculation_done' not in st.session_state: st.session_state['calculation_done'] = False
@@ -85,7 +88,7 @@ if 'final_cost_per_box_usd' not in st.session_state: st.session_state['final_cos
 
 
 # --- Display Currency (single FX at the end) ---
-st.sidebar.subheader("Reporting Currency")
+_sidebar_section("Reporting currency")
 display_currency = st.sidebar.selectbox(
     "Display results in:",
     DISPLAY_CURRENCIES,
@@ -141,18 +144,6 @@ st.sidebar.metric(
 if st.sidebar.button("Refresh live FX", help="Clear cache and re-fetch FX rates", disabled=(display_currency == "USD")):
     st.cache_data.clear()
     st.rerun()
-
-# --- Interest rate (sidebar input, not a constant) ---
-interest_rate_percent = st.sidebar.number_input(
-    "Interest Rate (%):",
-    min_value=0.0,
-    value=5.0,
-    step=0.1,
-    format="%.2f",
-    help="Applied on top of intermediate cost. Persists across pages via session state.",
-)
-interest_rate = interest_rate_percent / 100.0
-st.session_state["interest_rate_percent"] = interest_rate_percent
 
 # Push display state into session_state so cogs.formatters can read it.
 st.session_state["display_currency"] = display_currency
@@ -227,13 +218,12 @@ except Exception as e: st.error(f"Could not extract lists: {e}"); product_ids = 
 
 
 # --- Streamlit User Interface ---
-st.sidebar.header("Calculation Inputs")
-# Product Selection
+_sidebar_section("Product")
 if not product_ids: st.sidebar.warning("No products available."); selected_product = None
 else: selected_product = st.sidebar.selectbox("Select Product:", product_ids)
 
 # --- Quantity / Pallet Linking ---
-st.sidebar.subheader("Quantity & Pallets")
+_sidebar_section("Quantity & pallets")
 auto_calc_boxes = st.sidebar.checkbox("Calculate Box Quantity from Pallets?", value=False)
 
 boxes_per_pallet = 0; calculated_boxes = 0; can_auto_calc = False
@@ -260,7 +250,7 @@ if not pallet_types: st.sidebar.warning("No pallet types loaded."); selected_pal
 else: none_index = pallet_types.index("None") if "None" in pallet_types else 0; selected_pallet_type = st.sidebar.selectbox("Select Pallet Type:", pallet_types, index=none_index)
 
 # Raw Product Cost & Other Costs
-st.sidebar.subheader("Costs") # Group remaining costs
+_sidebar_section("Costs")
 raw_cost_per_kg_try = st.sidebar.number_input("Raw Product Cost per KG (USD):", min_value=0.0, value=1.0, step=0.05, format="%.3f", help="Bare fruit cost per KG, in USD. One currency for everything.")
 
 # --- Show Fixed Cost Totals in Radio Options ---
@@ -291,12 +281,8 @@ else:
     fixed_cost_label_suffix = "(All)"
     fixed_cost_mode = "standard"
 
-unexpected_cost_try = st.sidebar.number_input("Unexpected Costs (USD for batch):", min_value=0.0, value=0.0, step=10.0, format="%.2f")
-include_variable_costs = st.sidebar.checkbox("Include Variable Component Costs in COGS?", value=True)
-
-
 # Logistics Inputs
-st.sidebar.subheader("Logistics")
+_sidebar_section("Logistics")
 shipment_types = ["Select...", "Air", "Container", "Truck"]; selected_shipment_type = st.sidebar.selectbox("Select Shipment Type:", shipment_types)
 selected_destination = None
 if selected_shipment_type == "Air":
@@ -316,16 +302,35 @@ if selected_shipment_type in ["Container", "Truck"]:
     )
     manual_logistics_cost_usd = manual_logistics_cost_input
 
-# *** NEW: Rebate Input ***
-st.sidebar.subheader("Sales Adjustments")
+_sidebar_section("Sales adjustments")
 rebate_rate_input = st.sidebar.number_input(
     "Retailer Rebate/Fee (%):",
     min_value=0.0,
-    value=0.0,        # Default to 0%
+    value=0.0,
     step=0.1,
-    format="%.2f",    # Allow one decimal place for percentage
-    help="Enter a percentage (e.g., 5 for 5%) to be added to the Total Delivered Cost."
+    format="%.2f",
+    help="Enter a percentage (e.g., 5 for 5%) to be added to the Total Delivered Cost.",
 )
+
+with st.sidebar.expander("Advanced", expanded=False):
+    interest_rate_percent = st.number_input(
+        "Interest Rate (%):",
+        min_value=0.0,
+        value=5.0,
+        step=0.1,
+        format="%.2f",
+        help="Applied on top of intermediate cost. Persists across pages via session state.",
+    )
+    unexpected_cost_try = st.number_input(
+        "Unexpected Costs (USD for batch):",
+        min_value=0.0, value=0.0, step=10.0, format="%.2f",
+    )
+    include_variable_costs = st.checkbox(
+        "Include Variable Component Costs in COGS?", value=True,
+    )
+
+interest_rate = interest_rate_percent / 100.0
+st.session_state["interest_rate_percent"] = interest_rate_percent
 
 
 # --- Calculation Logic ---
@@ -341,160 +346,93 @@ calculation_ready = (
 
 if calculation_ready and st.sidebar.button("Calculate Costs"):
 
-    # --- Initialize variables ---
-    # ... (Initialize ALL calculation variables used below to 0.0 or empty dataframes/strings) ...
-    total_raw_cost_usd=0.0; raw_cost_per_box_usd=0.0; total_variable_comp_cost_usd=0.0; total_per_unit_variable_comp_cost_usd=0.0; total_pallet_cost_usd=0.0; pallet_cost_per_box_usd=0.0; total_variable_costs_incl_pallets_usd=0.0; variable_costs_incl_pallets_per_box_usd=0.0; total_allocated_fixed_cost_usd=0.0; fixed_cost_per_unit_usd=0.0; total_cogs_usd=0.0; cogs_per_box_usd=0.0; cogs_per_kg_usd=0.0; total_logistics_cost_usd=0.0; logistics_per_box_usd=0.0; logistics_per_kg_gross_usd=0.0; total_unexpected_cost_usd=0.0; unexpected_cost_per_box_usd=0.0; total_delivered_cost_usd=0.0; delivered_cost_per_box_usd=0.0; delivered_cost_per_kg_net_usd=0.0; total_packaging_weight_kg=0.0; calculated_gross_weight_kg_per_box=0.0; final_shipping_gross_weight_kg=0.0; total_pallet_weight_kg=0.0; total_net_weight_kg=0.0; freight_or_fixed_logistics_cost=0.0; fixed_logistics_price=0.0; awb_cost=0.0; logistics_rate_per_kg=0.0; interest_cost_usd=0.0;
-    # *** NEW: Rebate variables ***
-    rebate_percentage = 0.0; rebate_amount_usd = 0.0; final_total_cost_usd = 0.0; final_cost_per_box_usd = 0.0
+    selected_product_str = str(selected_product)
+    calc_errors = []
+    result = None
 
-    product_variable_costs_detailed = pd.DataFrame() # Ensure it's defined
-    calc_errors = [] # List to hold calculation errors
-
-    try: # Main calculation try block
-        selected_product_str = str(selected_product)
-
-        # 1. Get Pallet Specs & Cost/Weight
-        cost_per_pallet_usd = 0.0; weight_per_pallet_kg = 0.0
-        if selected_pallet_type != "None" and num_pallets > 0 and pallets_df is not None:
-            pallet_spec = pallets_df[pallets_df['PalletType'] == selected_pallet_type]
-            if not pallet_spec.empty:
-                cost_per_pallet_usd = pallet_spec['CostUSD'].iloc[0]
-                weight_per_pallet_kg = pallet_spec['WeightKG'].iloc[0]
-            else: st.warning(f"Specs missing for pallet '{selected_pallet_type}'. Cost/Weight assumed 0.")
-        total_pallet_cost_usd = num_pallets * cost_per_pallet_usd
-        total_pallet_weight_kg = num_pallets * weight_per_pallet_kg
-        pallet_cost_per_box_usd = total_pallet_cost_usd / quantity_input if quantity_input > 0 else 0
-
-        # 2. Get Net Weight
-        product_weight_info = product_weights_df[product_weights_df['ProductID'] == selected_product_str]
-        if product_weight_info.empty: raise ValueError(f"Net Weight missing for '{selected_product_str}' in '{WEIGHTS_CSV}'.")
-        net_weight_kg = product_weight_info['NetWeightKG'].iloc[0]
-        if not net_weight_kg > 0: raise ValueError(f"Net Weight for '{selected_product_str}' must be > 0.")
-
-        # 3. Raw Product Cost
-        raw_cost_per_kg_usd = raw_cost_per_kg_try * exchange_rate
-        raw_cost_per_box_usd = raw_cost_per_kg_usd * net_weight_kg
-        total_raw_cost_usd = raw_cost_per_box_usd * quantity_input
-
-        # 4. Variable Component Costs & Packaging Weight
-        total_packaging_weight_kg = 0.0 # Initialize packaging weight
-
-        # Always calculate packaging weight from recipe for logistics, regardless of cost inclusion
-        product_recipe = product_recipe_df[product_recipe_df['ProductID'] == selected_product_str]
-        if not product_recipe.empty:
-            recipe_components = product_recipe['ComponentName'].unique()
-            available_components = components_df['ComponentName'].unique()
-            missing_in_components_df = [comp for comp in recipe_components if comp not in available_components]
-            if missing_in_components_df:
-                 raise ValueError(f"Component(s) in recipe for '{selected_product_str}' not found in '{COMPONENTS_CSV}': {missing_in_components_df}")
-
-            product_variable_costs_detailed = pd.merge(
-                product_recipe, components_df[['ComponentName', 'CostPerUnit_USD', 'WeightKG']],
-                on='ComponentName', how='left'
-            )
-            if product_variable_costs_detailed.isnull().values.any():
-                missing = pd.Series(product_variable_costs_detailed[product_variable_costs_detailed.isnull().any(axis=1)]['ComponentName']).unique().tolist()
-                raise ValueError(f"Details missing after merge for component(s): {missing}. Check '{COMPONENTS_CSV}'.")
-
-            product_variable_costs_detailed['QuantityPerProduct'] = pd.to_numeric(product_variable_costs_detailed['QuantityPerProduct'], errors='coerce')
-            if product_variable_costs_detailed['QuantityPerProduct'].isnull().any():
-                raise ValueError("Non-numeric 'QuantityPerProduct' found in recipe.")
-
-            # Calculate Weight first
-            product_variable_costs_detailed['LineItemWeightKG'] = product_variable_costs_detailed['WeightKG'] * product_variable_costs_detailed['QuantityPerProduct']
-            total_packaging_weight_kg = product_variable_costs_detailed['LineItemWeightKG'].sum()
-
-            # Calculate Cost only if included
-            if include_variable_costs:
-                product_variable_costs_detailed['LineItemCost_USD'] = product_variable_costs_detailed['CostPerUnit_USD'] * product_variable_costs_detailed['QuantityPerProduct']
-                total_per_unit_variable_comp_cost_usd = product_variable_costs_detailed['LineItemCost_USD'].sum()
-                total_variable_comp_cost_usd = total_per_unit_variable_comp_cost_usd * quantity_input
-            else:
-                # Ensure costs are zero if not included
-                product_variable_costs_detailed['LineItemCost_USD'] = 0.0
-                total_per_unit_variable_comp_cost_usd = 0.0
-                total_variable_comp_cost_usd = 0.0
-        else:
-            # No recipe found, variable costs and packaging weight are zero
-            total_per_unit_variable_comp_cost_usd = 0.0
-            total_variable_comp_cost_usd = 0.0
-            total_packaging_weight_kg = 0.0
-            st.warning(f"No recipe found for ProductID '{selected_product_str}' in '{RECIPE_CSV}'. Variable costs & packaging weight assumed 0.")
-
-        # Total Variable (Components + Pallets)
-        total_variable_costs_incl_pallets_usd = total_variable_comp_cost_usd + total_pallet_cost_usd
-        variable_costs_incl_pallets_per_box_usd = total_variable_costs_incl_pallets_usd / quantity_input if quantity_input > 0 else 0
-
-        # --- Intermediate Weights ---
-        calculated_gross_weight_kg_per_box = net_weight_kg + total_packaging_weight_kg
-        total_batch_gross_weight_boxes_only = calculated_gross_weight_kg_per_box * quantity_input
-        final_shipping_gross_weight_kg = total_batch_gross_weight_boxes_only + total_pallet_weight_kg
-
-        # --- 6. Logistics Costs (Freight/Fixed ONLY) ---
-        freight_or_fixed_logistics_cost = 0.0; logistics_rate_per_kg = 0.0; awb_cost = 0.0; fixed_logistics_price = 0.0; logistics_cost_source = "N/A"
-        if selected_shipment_type == "Air":
-            if air_rates_df is not None and not air_rates_df.empty:
-                 applicable_rates = air_rates_df[ (air_rates_df['Destination'] == selected_destination) & (air_rates_df['MinWeightKG'] <= final_shipping_gross_weight_kg) ].sort_values('MinWeightKG', ascending=False)
-                 if not applicable_rates.empty:
-                     rate_row = applicable_rates.iloc[0]; logistics_rate_per_kg = rate_row['PricePerKG_USD']; awb_cost = rate_row['AirwayBill_USD']
-                     freight_or_fixed_logistics_cost = (final_shipping_gross_weight_kg * logistics_rate_per_kg) + awb_cost; logistics_cost_source = f"Air: {rate_row['MinWeightKG']}+ KG Tier"
-                 else: st.warning(f"No AIR rate for {selected_destination} at {final_shipping_gross_weight_kg:.2f} KG."); logistics_cost_source = "Air: No Rate Found"; freight_or_fixed_logistics_cost = 0.0
-            else: st.warning(f"Air rates file '{AIR_RATES_CSV}' missing or empty."); logistics_cost_source = "Air: Rates Missing"; freight_or_fixed_logistics_cost = 0.0
-        elif selected_shipment_type in ["Container", "Truck"]:
-             freight_or_fixed_logistics_cost = manual_logistics_cost_usd; fixed_logistics_price = manual_logistics_cost_usd; logistics_cost_source = f"{selected_shipment_type}: Manual Input"
-        total_logistics_cost_usd = freight_or_fixed_logistics_cost
-        logistics_per_box_usd = total_logistics_cost_usd / quantity_input if quantity_input > 0 else 0
-        logistics_per_kg_gross_usd = total_logistics_cost_usd / final_shipping_gross_weight_kg if final_shipping_gross_weight_kg > 0 else 0
-
-        # --- 7. Unexpected Cost ---
-        total_unexpected_cost_usd = unexpected_cost_try * exchange_rate
-        unexpected_cost_per_box_usd = total_unexpected_cost_usd / quantity_input if quantity_input > 0 else 0
-
-        # --- 8. Fixed Costs (10% Option Calculated Here, after Logistics) ---
-        interest_base_cost = 0.0
-        if fixed_cost_mode == "percent":
-            total_value_for_percent = total_raw_cost_usd + total_variable_costs_incl_pallets_usd + total_logistics_cost_usd + total_unexpected_cost_usd
-            fixed_cost_10_percent = total_value_for_percent * 0.10
-            total_allocated_fixed_cost_usd = fixed_cost_10_percent  # Only the 10% value, do not add interest here
-        else:
-            # Remove debug output for production
-            standard_fixed_df = fixed_df[ (fixed_df['CostItem'].str.strip().str.lower() != INTEREST_COST_ITEM_NAME.lower()) & (fixed_df['Category'].isin(fixed_categories_to_include)) ]
-            total_standard_fixed_cost_usd = standard_fixed_df['MonthlyCost_USD'].sum()
-            total_allocated_fixed_cost_usd = total_standard_fixed_cost_usd
-
-        # Interest should account for the entire amount we pre-finance (raw, variable, fixed, logistics, unexpected)
-        interest_base_cost = (
-            total_raw_cost_usd
-            + total_variable_costs_incl_pallets_usd
-            + total_allocated_fixed_cost_usd
-            + total_logistics_cost_usd
-            + total_unexpected_cost_usd
+    try:
+        result = compute_landed_cost(
+            selected_product=selected_product_str,
+            quantity_boxes=quantity_input,
+            selected_pallet_type=selected_pallet_type,
+            num_pallets=num_pallets,
+            raw_cost_per_kg_usd=raw_cost_per_kg_try,
+            include_variable_costs=include_variable_costs,
+            fixed_cost_mode=fixed_cost_mode,
+            fixed_categories=fixed_categories_to_include,
+            interest_rate=interest_rate,
+            unexpected_cost_usd=unexpected_cost_try,
+            rebate_percentage=rebate_rate_input,
+            shipment_type=selected_shipment_type,
+            destination=selected_destination,
+            manual_logistics_cost_usd=manual_logistics_cost_usd,
+            product_weights_df=product_weights_df,
+            product_recipe_df=product_recipe_df,
+            components_df=components_df,
+            pallets_df=pallets_df,
+            fixed_df=fixed_df,
+            air_rates_df=air_rates_df,
         )
-        interest_cost_usd = interest_base_cost * interest_rate
-        fixed_cost_per_unit_usd = total_allocated_fixed_cost_usd / quantity_input if quantity_input > 0 else 0
-        total_cogs_usd = total_raw_cost_usd + total_variable_costs_incl_pallets_usd + total_allocated_fixed_cost_usd + interest_cost_usd
-        cogs_per_box_usd = total_cogs_usd / quantity_input if quantity_input > 0 else 0; total_net_weight_kg = net_weight_kg * quantity_input; cogs_per_kg_usd = total_cogs_usd / total_net_weight_kg if total_net_weight_kg > 0 else 0
+        for w in result.warnings:
+            st.warning(w)
+    except ValueError as ve: calc_errors.append(f"Data Input Error: {ve}")
+    except KeyError as ke: calc_errors.append(f"Data Lookup Error: Missing key {ke}. Check file headers/content.")
+    except ZeroDivisionError: calc_errors.append("Calculation Error: Division by zero (check Quantity).")
+    except AssertionError as ae: calc_errors.append(f"Data Validation Failed: {ae}")
+    except Exception as e_main_calc: calc_errors.append(f"Unexpected calculation error: {e_main_calc}")
 
-        # --- 11. Total Delivered Cost (Before Rebate) ---
-        total_delivered_cost_usd = total_cogs_usd + total_logistics_cost_usd + total_unexpected_cost_usd
-        delivered_cost_per_box_usd = total_delivered_cost_usd / quantity_input if quantity_input > 0 else 0
-        delivered_cost_per_kg_net_usd = total_delivered_cost_usd / total_net_weight_kg if total_net_weight_kg > 0 else 0
+    if result is not None and not calc_errors:
+        # Unpack result into the local names the display blocks below already use.
+        net_weight_kg = result.net_weight_kg_per_box
+        calculated_gross_weight_kg_per_box = result.gross_weight_kg_per_box
+        final_shipping_gross_weight_kg = result.final_shipping_gross_weight_kg
+        total_net_weight_kg = result.total_net_weight_kg
+        total_packaging_weight_kg = result.total_packaging_weight_kg
 
-        # *** NEW: 12. RETAILER REBATE/FEE CALCULATION ***
-        rebate_percentage = rebate_rate_input # Get percentage from sidebar input
-        # Calculate the rebate amount based on the total delivered cost
-        rebate_amount_usd = total_delivered_cost_usd * (rebate_percentage / 100.0)
-        # Calculate the final total cost including the rebate
-        final_total_cost_usd = total_delivered_cost_usd + rebate_amount_usd
-        # Calculate the final cost per box including the rebate
-        final_cost_per_box_usd = final_total_cost_usd / quantity_input if quantity_input > 0 else 0
+        total_raw_cost_usd = result.total_raw_cost_usd
+        raw_cost_per_box_usd = result.raw_cost_per_box_usd
+        total_variable_comp_cost_usd = result.total_variable_comp_cost_usd
+        total_per_unit_variable_comp_cost_usd = result.total_per_unit_variable_comp_cost_usd
+        total_pallet_cost_usd = result.total_pallet_cost_usd
+        pallet_cost_per_box_usd = result.pallet_cost_per_box_usd
+        total_variable_costs_incl_pallets_usd = result.total_variable_costs_incl_pallets_usd
+        variable_costs_incl_pallets_per_box_usd = result.variable_costs_incl_pallets_per_box_usd
+        total_allocated_fixed_cost_usd = result.total_allocated_fixed_cost_usd
+        fixed_cost_10_percent = result.fixed_cost_10_percent
+        fixed_cost_per_unit_usd = result.fixed_cost_per_unit_usd
+        interest_cost_usd = result.interest_cost_usd
+        total_cogs_usd = result.total_cogs_usd
+        cogs_per_box_usd = result.cogs_per_box_usd
+        cogs_per_kg_usd = result.cogs_per_kg_usd
 
-        # *** NEW: 13. PROFIT MARGIN CALCULATIONS ***
-        # Store profit analysis data
+        total_logistics_cost_usd = result.total_logistics_cost_usd
+        freight_or_fixed_logistics_cost = result.freight_or_fixed_logistics_cost
+        logistics_rate_per_kg = result.logistics_rate_per_kg
+        awb_cost = result.awb_cost
+        fixed_logistics_price = result.fixed_logistics_price
+        logistics_per_box_usd = result.logistics_per_box_usd
+        logistics_per_kg_gross_usd = result.logistics_per_kg_gross_usd
+        logistics_cost_source = result.logistics_cost_source
+
+        total_unexpected_cost_usd = result.total_unexpected_cost_usd
+        unexpected_cost_per_box_usd = result.unexpected_cost_per_box_usd
+
+        total_delivered_cost_usd = result.total_delivered_cost_usd
+        delivered_cost_per_box_usd = result.delivered_cost_per_box_usd
+        delivered_cost_per_kg_net_usd = result.delivered_cost_per_kg_net_usd
+
+        rebate_percentage = result.rebate_percentage
+        rebate_amount_usd = result.rebate_amount_usd
+        final_total_cost_usd = result.final_total_cost_usd
+        final_cost_per_box_usd = result.final_cost_per_box_usd
+
+        weight_per_pallet_kg = result.weight_per_pallet_kg
+        product_variable_costs_detailed = result.product_variable_costs_detailed
+
         st.session_state['profit_analysis'] = {
             'final_cost_per_box_usd': final_cost_per_box_usd,
             'cogs_per_box_usd': cogs_per_box_usd,
-            'delivered_cost_per_box_usd': delivered_cost_per_box_usd
+            'delivered_cost_per_box_usd': delivered_cost_per_box_usd,
         }
 
         summary_data = {
@@ -512,10 +450,9 @@ if calculation_ready and st.sidebar.button("Calculate Costs"):
             "5. Unexpected Costs": format_cost_by_mode(total_unexpected_cost_usd, currency_display_mode),
             "      Delivered Cost (Before Rebate)": format_cost_by_mode(total_delivered_cost_usd, currency_display_mode),
             f"6. Rebate/Fee ({rebate_percentage:.1f}%)": format_cost_by_mode(rebate_amount_usd, currency_display_mode),
-            "Grand Total Cost (incl Rebate)": format_cost_by_mode(final_total_cost_usd, currency_display_mode)
+            "Grand Total Cost (incl Rebate)": format_cost_by_mode(final_total_cost_usd, currency_display_mode),
         }
 
-        # Persist results for use by other pages and tabs.
         st.session_state['calculation_done'] = True
         st.session_state['summary_data'] = summary_data
         st.session_state['last_calc_product'] = selected_product_str
@@ -534,13 +471,6 @@ if calculation_ready and st.sidebar.button("Calculate Costs"):
         st.session_state['weight_per_pallet_kg'] = weight_per_pallet_kg
         st.session_state['num_pallets'] = num_pallets
 
-    # --- Exception Handling for Main Calculation ---
-    except ValueError as ve: calc_errors.append(f"Data Input Error: {ve}")
-    except KeyError as ke: calc_errors.append(f"Data Lookup Error: Missing key {ke}. Check file headers/content.")
-    except ZeroDivisionError: calc_errors.append("Calculation Error: Division by zero (check Quantity).")
-    except AssertionError as ae: calc_errors.append(f"Data Validation Failed: {ae}")
-    except Exception as e_main_calc: calc_errors.append(f"Unexpected calculation error: {e_main_calc}")
-
     # --- Display Results OR Errors ---
     if calc_errors:
         st.error("Calculation failed. Please resolve errors:")
@@ -558,62 +488,95 @@ if calculation_ready and st.sidebar.button("Calculate Costs"):
             f"{display_destination}{display_pallet}{display_rebate} | **Fixed Costs:** `{fixed_cost_selection}`" # Added rebate here
         )
 
-        colw1, colw2, colw3 = st.columns(3)
-        colw1.metric("Net Wt/Box", f"{net_weight_kg:.3f} KG")
-        colw2.metric("Gross Wt/Box", f"{calculated_gross_weight_kg_per_box:.3f} KG")
-        colw3.metric("Final Shipping Wt (Batch)", f"{final_shipping_gross_weight_kg:.3f} KG", f"{num_pallets} Pallets")
+        st.markdown(
+            "<dl style='display:grid;grid-template-columns:repeat(3,minmax(0,1fr));"
+            "gap:18px;margin:8px 0 18px;padding:0;'>"
+            "<div><dt style='font-family:ui-monospace,SFMono-Regular,Menlo,monospace;"
+            "font-size:0.65rem;letter-spacing:0.16em;text-transform:uppercase;"
+            "color:var(--ink-muted);margin:0 0 4px;'>Net wt / box</dt>"
+            f"<dd style='margin:0;font-size:1.1rem;font-weight:600;color:var(--ink);'>{net_weight_kg:.3f} kg</dd></div>"
+            "<div><dt style='font-family:ui-monospace,SFMono-Regular,Menlo,monospace;"
+            "font-size:0.65rem;letter-spacing:0.16em;text-transform:uppercase;"
+            "color:var(--ink-muted);margin:0 0 4px;'>Gross wt / box</dt>"
+            f"<dd style='margin:0;font-size:1.1rem;font-weight:600;color:var(--ink);'>{calculated_gross_weight_kg_per_box:.3f} kg</dd></div>"
+            "<div><dt style='font-family:ui-monospace,SFMono-Regular,Menlo,monospace;"
+            "font-size:0.65rem;letter-spacing:0.16em;text-transform:uppercase;"
+            "color:var(--ink-muted);margin:0 0 4px;'>Shipping wt (batch)</dt>"
+            f"<dd style='margin:0;font-size:1.1rem;font-weight:600;color:var(--ink);'>{final_shipping_gross_weight_kg:.2f} kg "
+            f"<span style='font-size:0.78rem;font-weight:500;color:var(--ink-muted);'>· {num_pallets} pallets</span></dd></div>"
+            "</dl>",
+            unsafe_allow_html=True,
+        )
 
         st.markdown("---")
-        # Renamed Delivered Cost tab
-        tab_cogs, tab_logistics, tab_total, tab_summary, tab_profit = st.tabs([
-            "💰 COGS",
-            f"🚚 Logistics ({selected_shipment_type})",
-            "📦 Delivered Cost (+Rebate)", # Renamed
-            "📊 Batch Summary Detail",
-            "📈 Profit Analysis"
+        tab_cost, tab_detail, tab_profit = st.tabs([
+            "Cost",
+            "Detail",
+            "Profit",
         ])
 
-        # --- COGS Tab ---
-        # ... (remains the same) ...
-        with tab_cogs:
-            st.subheader(f"Cost of Goods Sold {fixed_cost_label_suffix}")
-            col1a, col1b = st.columns(2); col1a.metric("Total COGS", format_cost_by_mode(total_cogs_usd, currency_display_mode)); col1b.metric("COGS / Box", format_cost_by_mode(cogs_per_box_usd, currency_display_mode)); col1b.metric("COGS / KG (Net)", format_cost_by_mode(cogs_per_kg_usd, currency_display_mode))
-            st.subheader("COGS Components (Total)"); col2a, col2b, col2c = st.columns(3); col2a.metric("Raw Product", format_cost_by_mode(total_raw_cost_usd, currency_display_mode)); col2b.metric("Variable (incl. Pallets)", format_cost_by_mode(total_variable_costs_incl_pallets_usd, currency_display_mode), help=f"Only included if checkbox is checked. Pallet cost always included."); col2c.metric(f"Fixed Costs {fixed_cost_label_suffix}", format_cost_by_mode(total_allocated_fixed_cost_usd, currency_display_mode), help=f"Includes Calc. Interest: {format_cost_by_mode(interest_cost_usd, currency_display_mode)}" if interest_cost_usd > 0 else None)
-            st.subheader("COGS Breakdown (Per Box)"); st.write(f"- Raw Product: {format_cost_by_mode(raw_cost_per_box_usd, currency_display_mode)}"); st.write(f"- Variable (incl. Pallets): {format_cost_by_mode(variable_costs_incl_pallets_per_box_usd, currency_display_mode)}"); st.caption(f"  (Components: {format_cost_by_mode(total_per_unit_variable_comp_cost_usd, currency_display_mode)} + Pallets: {format_cost_by_mode(pallet_cost_per_box_usd, currency_display_mode)})"); st.write(f"- Fixed Costs {fixed_cost_label_suffix}: {format_cost_by_mode(fixed_cost_per_unit_usd, currency_display_mode)}"); st.write(f"**= Total COGS Per Box:** {format_cost_by_mode(cogs_per_box_usd, currency_display_mode)}")
+        with tab_cost:
+            # Top-line: three stat metrics — COGS / Logistics / Delivered+Rebate
+            top_a, top_b, top_c = st.columns(3)
+            top_a.metric("Total COGS", format_cost_by_mode(total_cogs_usd, currency_display_mode), help=f"Per box: {format_cost_by_mode(cogs_per_box_usd, currency_display_mode)} · per kg net: {format_cost_by_mode(cogs_per_kg_usd, currency_display_mode)}")
+            top_b.metric("Logistics", format_cost_by_mode(total_logistics_cost_usd, currency_display_mode), help=f"{logistics_cost_source} · per box: {format_cost_by_mode(logistics_per_box_usd, currency_display_mode)}")
+            top_c.metric("Delivered (incl. rebate)", format_cost_by_mode(final_total_cost_usd, currency_display_mode), help=f"Per box: {format_cost_by_mode(final_cost_per_box_usd, currency_display_mode)}")
 
-        # --- Logistics Tab ---
-        # ... (remains the same) ...
-        with tab_logistics:
-            st.subheader(f"{selected_shipment_type} Logistics Cost ({logistics_cost_source})"); col3a, col3b = st.columns(2); col3a.metric("Total Logistics Cost", format_cost_by_mode(total_logistics_cost_usd, currency_display_mode)); col3b.metric("Logistics / Box", format_cost_by_mode(logistics_per_box_usd, currency_display_mode));
-            if final_shipping_gross_weight_kg > 0: col3b.metric("Logistics / KG (Gross Ship Wt)", format_cost_by_mode(logistics_per_kg_gross_usd, currency_display_mode))
-            st.subheader("Logistics Components (Total)");
-            if selected_shipment_type == "Air": col4a, col4b = st.columns(2); freight_cost = final_shipping_gross_weight_kg * logistics_rate_per_kg; col4a.metric("Freight Cost", format_cost_by_mode(freight_cost, currency_display_mode), f"{final_shipping_gross_weight_kg:.2f}kg @ {format_cost_by_mode(logistics_rate_per_kg, currency_display_mode)}/kg"); col4b.metric("Airway Bill Cost", format_cost_by_mode(awb_cost, currency_display_mode))
-            elif selected_shipment_type in ["Container", "Truck"]:
-                st.metric(f"{selected_shipment_type} Fixed Price", format_cost(fixed_logistics_price))
-            else: st.write("N/A")
-
-        # --- Total Delivered Cost Tab (Modified for Rebate) ---
-        with tab_total:
-            st.subheader("Total Delivered Cost (COGS + Logistics + Unexpected + Rebate)") # Updated title
-            # Show costs *before* rebate first
-            st.metric("Total Delivered Cost (Before Rebate)", format_cost_by_mode(total_delivered_cost_usd, currency_display_mode))
-            st.write(f"*Calculation: {format_cost_by_mode(total_cogs_usd, currency_display_mode)} (COGS) + {format_cost_by_mode(total_logistics_cost_usd, currency_display_mode)} (Logistics) + {format_cost_by_mode(total_unexpected_cost_usd, currency_display_mode)} (Unexpected)*")
             st.markdown("---")
-            # Show rebate calculation
-            st.subheader(f"Retailer Rebate/Fee Adjustment ({rebate_percentage:.1f}%)")
-            col_rebate1, col_rebate2 = st.columns(2)
-            col_rebate1.metric("Rebate/Fee Amount (Total Batch)", format_cost_by_mode(rebate_amount_usd, currency_display_mode))
-            # Show final costs *after* rebate
-            col_rebate2.metric("Final Total Cost (Incl. Rebate)", format_cost_by_mode(final_total_cost_usd, currency_display_mode))
-            col_rebate2.metric("Final Cost / Box (Incl. Rebate)", format_cost_by_mode(final_cost_per_box_usd, currency_display_mode))
+
+            # COGS subsection
+            st.subheader(f"COGS {fixed_cost_label_suffix}")
+            col2a, col2b, col2c = st.columns(3)
+            col2a.metric("Raw Product", format_cost_by_mode(total_raw_cost_usd, currency_display_mode))
+            col2b.metric("Variable (incl. Pallets)", format_cost_by_mode(total_variable_costs_incl_pallets_usd, currency_display_mode), help="Only included if checkbox is checked. Pallet cost always included.")
+            col2c.metric(f"Fixed Costs {fixed_cost_label_suffix}", format_cost_by_mode(total_allocated_fixed_cost_usd, currency_display_mode), help=f"Includes Calc. Interest: {format_cost_by_mode(interest_cost_usd, currency_display_mode)}" if interest_cost_usd > 0 else None)
+            st.caption(
+                f"Per box — Raw: {format_cost_by_mode(raw_cost_per_box_usd, currency_display_mode)}"
+                f" · Variable: {format_cost_by_mode(variable_costs_incl_pallets_per_box_usd, currency_display_mode)}"
+                f" (Components {format_cost_by_mode(total_per_unit_variable_comp_cost_usd, currency_display_mode)}"
+                f" + Pallets {format_cost_by_mode(pallet_cost_per_box_usd, currency_display_mode)})"
+                f" · Fixed: {format_cost_by_mode(fixed_cost_per_unit_usd, currency_display_mode)}"
+                f" → COGS/box {format_cost_by_mode(cogs_per_box_usd, currency_display_mode)}"
+            )
+
+            st.markdown("---")
+
+            # Logistics subsection
+            st.subheader(f"{selected_shipment_type} logistics — {logistics_cost_source}")
+            if selected_shipment_type == "Air":
+                col4a, col4b = st.columns(2)
+                freight_cost = final_shipping_gross_weight_kg * logistics_rate_per_kg
+                col4a.metric("Freight", format_cost_by_mode(freight_cost, currency_display_mode), f"{final_shipping_gross_weight_kg:.2f} kg @ {format_cost_by_mode(logistics_rate_per_kg, currency_display_mode)}/kg")
+                col4b.metric("Airway Bill", format_cost_by_mode(awb_cost, currency_display_mode))
+            elif selected_shipment_type in ("Container", "Truck"):
+                st.metric(f"{selected_shipment_type} Fixed Price", format_cost(fixed_logistics_price))
+            else:
+                st.write("N/A")
+            if final_shipping_gross_weight_kg > 0:
+                st.caption(f"Per box: {format_cost_by_mode(logistics_per_box_usd, currency_display_mode)} · Per kg gross: {format_cost_by_mode(logistics_per_kg_gross_usd, currency_display_mode)}")
+
+            st.markdown("---")
+
+            # Delivered + Rebate subsection
+            st.subheader(f"Delivered cost · rebate {rebate_percentage:.1f}%")
+            col_d1, col_d2, col_d3 = st.columns(3)
+            col_d1.metric("Before rebate", format_cost_by_mode(total_delivered_cost_usd, currency_display_mode))
+            col_d2.metric("Rebate amount", format_cost_by_mode(rebate_amount_usd, currency_display_mode))
+            col_d3.metric("After rebate", format_cost_by_mode(final_total_cost_usd, currency_display_mode))
+            per_box_kg_caption = f"Per box: {format_cost_by_mode(final_cost_per_box_usd, currency_display_mode)}"
             if total_net_weight_kg > 0:
-                 final_cost_per_kg_net_usd = final_total_cost_usd / total_net_weight_kg
-                 col_rebate2.metric("Final Cost / KG Net (Incl. Rebate)", format_cost_by_mode(final_cost_per_kg_net_usd, currency_display_mode))
-            st.write(f"*Final Calculation: {format_cost_by_mode(total_delivered_cost_usd, currency_display_mode)} (Delivered Cost) + {format_cost_by_mode(rebate_amount_usd, currency_display_mode)} (Rebate)*")
+                final_cost_per_kg_net_usd = final_total_cost_usd / total_net_weight_kg
+                per_box_kg_caption += f" · Per kg net: {format_cost_by_mode(final_cost_per_kg_net_usd, currency_display_mode)}"
+            st.caption(per_box_kg_caption)
+            st.caption(
+                f"= {format_cost_by_mode(total_cogs_usd, currency_display_mode)} (COGS) "
+                f"+ {format_cost_by_mode(total_logistics_cost_usd, currency_display_mode)} (Logistics) "
+                f"+ {format_cost_by_mode(total_unexpected_cost_usd, currency_display_mode)} (Unexpected) "
+                f"+ {format_cost_by_mode(rebate_amount_usd, currency_display_mode)} (Rebate)"
+            )
 
-
-        # --- Batch Summary Detail Tab (Modified for Rebate) ---
-        with tab_summary:
+        # --- Detail tab (former Batch Summary Detail) ---
+        with tab_detail:
             st.subheader("Total Batch Cost Summary")
             summary_data_dict = st.session_state.get('summary_data', {})
             if summary_data_dict:
@@ -819,6 +782,89 @@ if st.session_state.get('calculation_done', False):
     st.caption("💡 Export includes cost breakdown, profit analysis, and sensitivity analysis (Excel only)")
 else:
     st.info("Run a calculation first to enable export options.")
+
+# --- Push Matrix to Google Sheets ---
+st.markdown("---")
+st.subheader("📤 Push matrix to Google Sheets")
+
+matrix_product_id = str(
+    st.session_state.get('last_calc_product') or selected_product or ""
+).strip()
+
+if st.session_state.get('calculation_done', False) and selected_shipment_type == "Air" and matrix_product_id:
+    st.caption(
+        "Recompute cost per box for all air destinations × {2, 4, 6, 10} pallets, "
+        "holding the rest of the current inputs constant. Preview below; click to send."
+    )
+    try:
+        from cogs.sheets import (
+            PALLET_COUNTS,
+            build_air_matrix,
+            get_gspread_client,
+            push_matrix,
+        )
+
+        base_inputs = {
+            "selected_product": matrix_product_id,
+            "selected_pallet_type": selected_pallet_type,
+            "raw_cost_per_kg_usd": raw_cost_per_kg_try,
+            "include_variable_costs": include_variable_costs,
+            "fixed_cost_mode": fixed_cost_mode,
+            "fixed_categories": fixed_categories_to_include,
+            "interest_rate": interest_rate,
+            "unexpected_cost_usd": unexpected_cost_try,
+            "rebate_percentage": rebate_rate_input,
+        }
+        dfs = {
+            "product_weights_df": product_weights_df,
+            "product_recipe_df": product_recipe_df,
+            "components_df": components_df,
+            "pallets_df": pallets_df,
+            "fixed_df": fixed_df,
+            "air_rates_df": air_rates_df,
+            "product_packing_df": product_packing_df,
+        }
+        matrix_df = build_air_matrix(base_inputs=base_inputs, dfs=dfs)
+        st.dataframe(
+            matrix_df.style.format("${:,.4f}"),
+            use_container_width=True,
+        )
+        st.caption(f"Cost per box in USD. Columns are pallet counts: {PALLET_COUNTS}")
+
+        if st.button("Push matrix to sheet"):
+            try:
+                client = get_gspread_client()
+                metadata = {
+                    "Date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "Product": matrix_product_id,
+                    "Raw Cost / KG (USD)": f"{raw_cost_per_kg_try:.3f}",
+                    "Rebate %": f"{rebate_rate_input:.2f}",
+                    "Fixed Cost Mode": fixed_cost_selection,
+                    "Reporting Currency": display_currency,
+                }
+                sheet_url = st.secrets["sheet_url"]
+                pushed_url = push_matrix(
+                    client, sheet_url,
+                    product=matrix_product_id,
+                    matrix_df=matrix_df,
+                    metadata=metadata,
+                )
+                st.success(f"Pushed. Open the sheet: {pushed_url}")
+            except KeyError as e:
+                st.error(
+                    f"Missing secret: {e}. Add `sheet_url` and `[gcp_service_account]` "
+                    "to `.streamlit/secrets.toml` (see `secrets.toml.example`)."
+                )
+            except Exception as e:
+                st.error(f"Push failed: {e}")
+    except ValueError as e:
+        st.warning(str(e))
+    except Exception as e:
+        st.error(f"Could not build matrix preview: {e}")
+elif st.session_state.get('calculation_done', False):
+    st.info("Matrix push is for Air shipments. Switch shipment type to Air and recalculate.")
+else:
+    st.info("Run a calculation first to enable matrix push.")
 
 # --- UI Improvements and Advanced Features ---
 st.markdown("---")
