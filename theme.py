@@ -314,9 +314,9 @@ _LIGHT_TOKENS = """
   --cyan:   #0b8f7e;
   --up:     #0b8f7e;
   --down:   #c23b3b;
-  --btn-bg: #15121f;
-  --btn-fg: #ffffff;
-  --btn-border: #15121f;
+  --btn-bg: #ffffff;
+  --btn-fg: #15121f;
+  --btn-border: rgba(20, 16, 30, 0.32);
   --tab-active-fg: #15121f;
   --glow: 0 2px 10px rgba(225,29,116,0.22);
   --metric-shadow: none;

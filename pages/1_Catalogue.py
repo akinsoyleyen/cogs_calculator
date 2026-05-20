@@ -1,9 +1,36 @@
 # -*- coding: utf-8 -*-
 import os
+from datetime import datetime
 import pandas as pd
 import streamlit as st
 
 from theme import apply_theme
+from cogs.github_writer import github_is_configured, push_paths
+
+
+def _persist_to_github(paths: list[str], label: str) -> None:
+    """Try to commit the saved CSV(s) to GitHub. Silently no-op if not configured."""
+    if not github_is_configured():
+        st.info(
+            "Edits saved locally only — Streamlit Cloud wipes them on reload. "
+            "Add `github_token` and `github_repo` to `.streamlit/secrets.toml` "
+            "to auto-commit. See README."
+        )
+        return
+    msg = f"Catalogue: update {label} ({datetime.now():%Y-%m-%d %H:%M})"
+    try:
+        with st.spinner(f"Pushing {label} to GitHub…"):
+            result = push_paths(paths, msg)
+        shas = [s for s in result.values() if s != "unchanged"]
+        if shas:
+            st.toast(f"Pushed to GitHub ({shas[0][:7]}). Cloud redeploy in ~30-60 s.")
+        else:
+            st.toast("GitHub already matched local — nothing to push.")
+    except Exception as e:
+        st.error(
+            f"Saved locally but GitHub push failed: {e}. "
+            "Edits will revert on next Cloud reload."
+        )
 
 COMPONENTS_CSV = "components.csv"
 RECIPE_CSV = "product_recipe.csv"
@@ -136,6 +163,7 @@ with tabs[0]:
                     f"Saved {len(cleaned)} products. "
                     f"Recipes for removed products were dropped."
                 )
+                _persist_to_github([WEIGHTS_CSV, PACKING_CSV, RECIPE_CSV], "products")
                 st.rerun()
             except Exception as e:
                 st.error(f"Failed to write CSVs: {e}")
@@ -195,6 +223,7 @@ with tabs[0]:
                     out = pd.concat([others, clean_recipe], ignore_index=True)
                     save_csv(out, RECIPE_CSV)
                     st.success(f"Recipe for '{sel}' saved ({len(clean_recipe)} line(s)).")
+                    _persist_to_github([RECIPE_CSV], f"recipe for {sel}")
                     st.rerun()
                 except Exception as e:
                     st.error(f"Failed to write `{RECIPE_CSV}`: {e}")
@@ -240,6 +269,7 @@ with tabs[1]:
             try:
                 save_csv(cleaned, COMPONENTS_CSV)
                 st.success(f"Saved {len(cleaned)} components.")
+                _persist_to_github([COMPONENTS_CSV], "components")
                 st.rerun()
             except Exception as e:
                 st.error(f"Failed to write `{COMPONENTS_CSV}`: {e}")
@@ -279,6 +309,7 @@ with tabs[2]:
             try:
                 save_csv(cleaned, PALLETS_CSV)
                 st.success(f"Saved {len(cleaned)} pallet types.")
+                _persist_to_github([PALLETS_CSV], "pallets")
                 st.rerun()
             except Exception as e:
                 st.error(f"Failed to write `{PALLETS_CSV}`: {e}")
@@ -322,6 +353,7 @@ with tabs[3]:
             try:
                 save_csv(out, FIXED_CSV)
                 st.success(f"Saved {len(out)} fixed-cost items.")
+                _persist_to_github([FIXED_CSV], "fixed costs")
                 st.rerun()
             except Exception as e:
                 st.error(f"Failed to write `{FIXED_CSV}`: {e}")
@@ -371,6 +403,7 @@ with tabs[4]:
             try:
                 save_csv(cleaned, AIR_RATES_CSV)
                 st.success(f"Saved {len(cleaned)} air-rate tiers.")
+                _persist_to_github([AIR_RATES_CSV], "air freight rates")
                 st.rerun()
             except Exception as e:
                 st.error(f"Failed to write `{AIR_RATES_CSV}`: {e}")

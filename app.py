@@ -337,6 +337,14 @@ rebate_rate_input = st.sidebar.number_input(
     format="%.2f",
     help="Enter a percentage (e.g., 5 for 5%) to be added to the Total Delivered Cost.",
 )
+target_profit_percent = st.sidebar.number_input(
+    "Target Profit (%):",
+    min_value=0.0,
+    value=0.0,
+    step=0.5,
+    format="%.1f",
+    help="Markup over cost shown in the matrix (and email). Sell price = cost × (1 + profit/100). 0 leaves the matrix as raw cost.",
+)
 
 with st.sidebar.expander("Advanced", expanded=False):
     interest_rate_percent = st.number_input(
@@ -809,19 +817,27 @@ if st.session_state.get('calculation_done', False):
 else:
     st.info("Run a calculation first to enable export options.")
 
-# --- Cost matrix (for pasting into emails) ---
+# --- Pricing matrix (for pasting into emails) ---
 st.markdown("---")
-st.subheader("📋 Cost matrix — air destinations × pallet count")
+_matrix_is_sell = target_profit_percent > 0
+_matrix_title_word = "Sell-price" if _matrix_is_sell else "Cost"
+st.subheader(f"{'💰' if _matrix_is_sell else '📋'} {_matrix_title_word} matrix — air destinations × pallet count")
 
 matrix_product_id = str(
     st.session_state.get('last_calc_product') or selected_product or ""
 ).strip()
 
 if st.session_state.get('calculation_done', False) and selected_shipment_type == "Air" and matrix_product_id:
-    st.caption(
-        "Cost per box (USD), recomputed for every air destination at 2 / 4 / 6 / 10 pallets. "
-        "Other inputs (raw cost, rebate, fixed-cost mode) follow the sidebar."
-    )
+    if _matrix_is_sell:
+        st.caption(
+            f"Sell price per box (USD) = cost × (1 + {target_profit_percent:.1f}%). "
+            "Other inputs (raw cost, rebate, fixed-cost mode) follow the sidebar."
+        )
+    else:
+        st.caption(
+            "Cost per box (USD), recomputed for every air destination at 2 / 4 / 6 / 10 pallets. "
+            "Set **Target Profit** in the sidebar to switch this to sell prices."
+        )
     try:
         from cogs.matrix import PALLET_COUNTS, build_air_matrix
 
@@ -845,9 +861,23 @@ if st.session_state.get('calculation_done', False) and selected_shipment_type ==
             "air_rates_df": air_rates_df,
             "product_packing_df": product_packing_df,
         }
-        matrix_df = build_air_matrix(base_inputs=base_inputs, dfs=dfs)
-        display_matrix = matrix_df.copy()
-        display_matrix.columns = [f"{int(c)} pallets" for c in display_matrix.columns]
+        cost_matrix_df = build_air_matrix(base_inputs=base_inputs, dfs=dfs)
+        profit_multiplier = 1.0 + (target_profit_percent / 100.0)
+        sell_matrix_df = (cost_matrix_df * profit_multiplier).round(2)
+        active_matrix_df = sell_matrix_df if _matrix_is_sell else cost_matrix_df
+
+        # Look up boxes_per_pallet for the carton sub-header
+        _packing_lookup = product_packing_df[product_packing_df["ProductID"] == matrix_product_id]
+        _bpp = int(_packing_lookup["BoxesPerPallet"].iloc[0]) if not _packing_lookup.empty else 0
+
+        # Two-row column header: top "N pallets", bottom "X cartons"
+        display_matrix = active_matrix_df.copy()
+        if _bpp > 0:
+            display_matrix.columns = pd.MultiIndex.from_tuples(
+                [(f"{int(c)} pallets", f"{int(c) * _bpp} cartons") for c in display_matrix.columns]
+            )
+        else:
+            display_matrix.columns = [f"{int(c)} pallets" for c in display_matrix.columns]
 
         st.dataframe(
             display_matrix.style.format("${:,.2f}"),
@@ -856,11 +886,19 @@ if st.session_state.get('calculation_done', False) and selected_shipment_type ==
 
         with st.expander("Copy for email (tab-separated)", expanded=False):
             st.caption(
-                f"Product: **{matrix_product_id}** · rebate **{rebate_rate_input:.1f}%** · "
-                f"raw **${raw_cost_per_kg_try:.3f}/kg** · "
+                f"Product: **{matrix_product_id}** · rebate **{rebate_rate_input:.1f}%**"
+                f"{f' · target profit **{target_profit_percent:.1f}%**' if _matrix_is_sell else ''}"
+                f" · raw **${raw_cost_per_kg_try:.3f}/kg** · "
                 f"{datetime.now().strftime('%Y-%m-%d')}"
             )
-            tsv = display_matrix.reset_index().to_csv(sep="\t", index=False, float_format="%.2f")
+            # Flatten the multi-index for clean TSV (single header row keeps Gmail paste tidy).
+            tsv_matrix = active_matrix_df.copy()
+            tsv_matrix.columns = (
+                [f"{int(c)} pallets / {int(c) * _bpp} cartons" if _bpp > 0
+                 else f"{int(c)} pallets"
+                 for c in tsv_matrix.columns]
+            )
+            tsv = tsv_matrix.reset_index().to_csv(sep="\t", index=False, float_format="%.2f")
             st.code(tsv, language="text")
             st.caption(
                 "Click the copy icon at the top-right of the block above. "
@@ -898,24 +936,53 @@ if st.session_state.get('calculation_done', False) and selected_shipment_type ==
                 if not recipient_email or "@" not in recipient_email:
                     st.error("Enter a valid recipient email.")
                 else:
+                    def _rows(m):
+                        return [
+                            {
+                                "destination": dest,
+                                **{
+                                    f"p{int(p)}": round(float(m.at[dest, p]), 2)
+                                    for p in m.columns
+                                },
+                                **(
+                                    {
+                                        f"cartons_p{int(p)}": int(p) * _bpp
+                                        for p in m.columns
+                                    }
+                                    if _bpp > 0
+                                    else {}
+                                ),
+                            }
+                            for dest in m.index
+                        ]
+
+                    # Flatten the multi-index header for the email HTML (single-row label).
+                    email_matrix = active_matrix_df.copy()
+                    email_matrix.columns = (
+                        [f"{int(c)} pallets<br><span style=\"color:#6c6478;font-weight:400;\">"
+                         f"{int(c) * _bpp} cartons</span>"
+                         if _bpp > 0 else f"{int(c)} pallets"
+                         for c in email_matrix.columns]
+                    )
+
                     payload = {
                         "from_app": "cogs_calculator",
                         "date_iso": datetime.now().isoformat(timespec="seconds"),
                         "product": matrix_product_id,
                         "raw_cost_per_kg_usd": round(raw_cost_per_kg_try, 4),
                         "rebate_percentage": round(rebate_rate_input, 2),
+                        "target_profit_percent": round(target_profit_percent, 2),
+                        "matrix_kind": "sell_price" if _matrix_is_sell else "cost",
+                        "boxes_per_pallet": _bpp,
                         "fixed_cost_mode": fixed_cost_selection,
                         "reporting_currency": display_currency,
                         "to_email": recipient_email,
                         "subject": subject,
                         "note": note,
-                        "matrix_html": render_matrix_html(display_matrix),
-                        "matrix_rows": [
-                            {"destination": dest,
-                             **{f"p{int(p)}": round(float(matrix_df.at[dest, p]), 2)
-                                for p in matrix_df.columns}}
-                            for dest in matrix_df.index
-                        ],
+                        "matrix_html": render_matrix_html(email_matrix),
+                        "matrix_rows": _rows(active_matrix_df),
+                        "cost_matrix_rows": _rows(cost_matrix_df),
+                        "sell_matrix_rows": _rows(sell_matrix_df),
                     }
                     try:
                         with st.spinner("Sending to Make…"):
@@ -933,11 +1000,11 @@ if st.session_state.get('calculation_done', False) and selected_shipment_type ==
     except ValueError as e:
         st.warning(str(e))
     except Exception as e:
-        st.error(f"Could not build cost matrix: {e}")
+        st.error(f"Could not build matrix: {e}")
 elif st.session_state.get('calculation_done', False):
-    st.info("Cost matrix is for Air shipments only. Switch shipment type to Air and recalculate.")
+    st.info("Matrix is for Air shipments only. Switch shipment type to Air and recalculate.")
 else:
-    st.info("Run a calculation first to see the cost matrix.")
+    st.info("Run a calculation first to see the matrix.")
 
 # --- UI Improvements and Advanced Features ---
 st.markdown("---")

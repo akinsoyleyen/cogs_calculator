@@ -91,6 +91,27 @@ Payload reference (what the webhook receives):
 }
 ```
 
+## Persisting Catalogue edits on Streamlit Cloud
+
+Streamlit Cloud has an ephemeral filesystem — any `.csv` edits made through the Catalogue page are wiped when the container restarts. To make edits durable, the app commits saved CSVs back to this repo via the GitHub API. Streamlit Cloud auto-redeploys after each commit (30–60 s).
+
+Setup (one-time, ~3 min):
+
+1. Generate a **fine-grained Personal Access Token** at https://github.com/settings/tokens?type=beta:
+   - *Resource owner:* you
+   - *Repository access:* "Only select repositories" → `cogs_calculator`
+   - *Permissions → Repository → Contents:* **Read and write**
+   - Pick an expiry that works for you (90 days is a sensible default; regenerate periodically).
+2. Add to `.streamlit/secrets.toml` locally **and** to Streamlit Cloud's Secrets panel:
+   ```toml
+   github_token  = "github_pat_..."
+   github_repo   = "akinsoyleyen/cogs_calculator"
+   github_branch = "main"   # optional, defaults to "main"
+   ```
+3. Restart the app. Each Save button on the Catalogue page now commits the updated CSV(s) to GitHub.
+
+If the token is absent, the Catalogue page still saves to the local container — you'll just see a banner explaining edits won't survive a Cloud reload. Local-only development without a token works fine.
+
 ## Modernization plan
 
 A phased modernization plan lives at [docs/MODERNIZATION_PLAN.md](docs/MODERNIZATION_PLAN.md).
