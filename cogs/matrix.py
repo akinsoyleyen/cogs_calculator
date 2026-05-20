@@ -1,27 +1,45 @@
-"""Google Sheets matrix push for landed-cost calculator."""
-from datetime import datetime
-from typing import Optional
-
-import gspread
+"""Build the air-freight cost matrix: 11 destinations × {2,4,6,10} pallets."""
 import pandas as pd
-import streamlit as st
-from google.oauth2.service_account import Credentials
 
 from cogs.calculator import compute_landed_cost
 
 PALLET_COUNTS = (2, 4, 6, 10)
-WORKSHEET_TITLE = "COGS Matrix"
-_SCOPES = [
-    "https://www.googleapis.com/auth/spreadsheets",
-    "https://www.googleapis.com/auth/drive",
-]
 
 
-@st.cache_resource(show_spinner=False)
-def get_gspread_client() -> gspread.Client:
-    creds_dict = dict(st.secrets["gcp_service_account"])
-    creds = Credentials.from_service_account_info(creds_dict, scopes=_SCOPES)
-    return gspread.authorize(creds)
+def render_matrix_html(matrix_df: pd.DataFrame) -> str:
+    """Inline-styled HTML table — safe for Gmail/Outlook/Apple Mail bodies."""
+    style_th = (
+        "text-align:left;padding:8px 12px;"
+        "border-bottom:2px solid #15121f;font-weight:600;"
+        "font-family:Arial,sans-serif;font-size:13px;color:#15121f;"
+    )
+    style_th_num = style_th.replace("text-align:left", "text-align:right")
+    style_td = (
+        "padding:6px 12px;border-bottom:1px solid #e5e2d9;"
+        "font-family:Arial,sans-serif;font-size:13px;color:#15121f;"
+    )
+    style_td_num = (
+        "text-align:right;padding:6px 12px;border-bottom:1px solid #e5e2d9;"
+        "font-family:Menlo,Consolas,monospace;font-size:13px;color:#15121f;"
+    )
+
+    head = "".join(
+        [f'<th style="{style_th}">Destination</th>']
+        + [f'<th style="{style_th_num}">{c}</th>' for c in matrix_df.columns]
+    )
+    body = []
+    for dest, row in matrix_df.iterrows():
+        cells = [f'<td style="{style_td}">{dest}</td>'] + [
+            f'<td style="{style_td_num}">${float(v):,.2f}</td>' for v in row
+        ]
+        body.append("<tr>" + "".join(cells) + "</tr>")
+
+    return (
+        '<table style="border-collapse:collapse;background:#fafaf7;">'
+        f"<thead><tr>{head}</tr></thead>"
+        f"<tbody>{''.join(body)}</tbody>"
+        "</table>"
+    )
 
 
 def build_air_matrix(
@@ -32,9 +50,8 @@ def build_air_matrix(
 ) -> pd.DataFrame:
     """Recompute final_cost_per_box_usd for every (destination, pallet count) pair.
 
-    base_inputs: keys from the calculator signature, minus num_pallets, quantity_boxes,
-    destination, shipment_type (we override those). It includes everything else the
-    calculator needs.
+    base_inputs: keys from the calculator signature minus num_pallets, quantity_boxes,
+    destination, shipment_type, manual_logistics_cost_usd (those are overridden here).
 
     dfs: {product_weights_df, product_recipe_df, components_df, pallets_df, fixed_df,
           air_rates_df, product_packing_df}.
@@ -50,14 +67,13 @@ def build_air_matrix(
     if packing.empty or not pd.notna(packing["BoxesPerPallet"].iloc[0]):
         raise ValueError(
             f"Boxes/Pallet not configured for '{product_id}' in product_packing.csv — "
-            "matrix push needs an auto-calculable quantity."
+            "matrix needs an auto-calculable quantity."
         )
     boxes_per_pallet = int(packing["BoxesPerPallet"].iloc[0])
     if boxes_per_pallet <= 0:
         raise ValueError(f"Boxes/Pallet for '{product_id}' must be > 0.")
 
     destinations = sorted(air_rates_df["Destination"].unique().tolist())
-
     matrix = pd.DataFrame(
         index=destinations,
         columns=list(pallet_counts),
@@ -87,47 +103,3 @@ def build_air_matrix(
 
     matrix.index.name = "Destination"
     return matrix
-
-
-def push_matrix(
-    client: gspread.Client,
-    sheet_url: str,
-    *,
-    product: str,
-    matrix_df: pd.DataFrame,
-    metadata: dict,
-    worksheet_title: str = WORKSHEET_TITLE,
-) -> str:
-    """Append a timestamped metadata block + matrix to the sheet. Returns sheet URL."""
-    sh = client.open_by_url(sheet_url)
-    try:
-        ws = sh.worksheet(worksheet_title)
-    except gspread.WorksheetNotFound:
-        ws = sh.add_worksheet(title=worksheet_title, rows=200, cols=12)
-        ws.append_row(["Cost-per-box (USD) matrix — appended runs grow downwards."])
-
-    rows: list[list] = []
-    rows.append([])  # blank separator from previous block
-
-    # Metadata header — six labelled rows.
-    for k in ("Date", "Product", "Raw Cost / KG (USD)",
-              "Rebate %", "Fixed Cost Mode", "Reporting Currency"):
-        rows.append([k, metadata.get(k, "")])
-
-    rows.append([])  # blank between metadata and matrix
-
-    # Matrix header + body
-    header = ["Destination"] + [f"{int(c)} pallets" for c in matrix_df.columns]
-    rows.append(header)
-    for dest, row in matrix_df.iterrows():
-        rows.append([dest, *[float(v) for v in row.tolist()]])
-
-    rows.append([])
-    rows.append([])
-
-    ws.append_rows(rows, value_input_option="USER_ENTERED")
-    return _worksheet_url(sh, ws)
-
-
-def _worksheet_url(sh: gspread.Spreadsheet, ws: gspread.Worksheet) -> str:
-    return f"https://docs.google.com/spreadsheets/d/{sh.id}/edit#gid={ws.id}"

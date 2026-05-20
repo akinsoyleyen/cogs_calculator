@@ -251,7 +251,33 @@ else: none_index = pallet_types.index("None") if "None" in pallet_types else 0; 
 
 # Raw Product Cost & Other Costs
 _sidebar_section("Costs")
-raw_cost_per_kg_try = st.sidebar.number_input("Raw Product Cost per KG (USD):", min_value=0.0, value=1.0, step=0.05, format="%.3f", help="Bare fruit cost per KG, in USD. One currency for everything.")
+
+# Raw fruit is purchased in TRY → live-convert to USD for the calc.
+_usd_try_rate, _usd_try_date = get_usd_to_target_rate("TRY")
+if _usd_try_rate is None:
+    _usd_try_rate = float(FALLBACK_USD_RATES.get("TRY", 38.0))
+    _usd_try_source = "fallback"
+else:
+    _usd_try_source = f"live · {_usd_try_date}"
+
+_col_try, _col_usd = st.sidebar.columns(2)
+raw_cost_per_kg_try_input = _col_try.number_input(
+    "Raw cost (TRY/kg):",
+    min_value=0.0,
+    value=float(_usd_try_rate),  # ~1 USD worth by default
+    step=1.0,
+    format="%.2f",
+    help="Enter fruit cost in Turkish Lira. Converted to USD live for the calculation.",
+)
+raw_cost_per_kg_try = raw_cost_per_kg_try_input / _usd_try_rate if _usd_try_rate > 0 else 0.0
+_col_usd.number_input(
+    "= USD/kg:",
+    value=float(raw_cost_per_kg_try),
+    disabled=True,
+    format="%.4f",
+    help="Auto-converted from TRY using the live Frankfurter rate.",
+)
+st.sidebar.caption(f"USD → TRY: {_usd_try_rate:.4f} ({_usd_try_source})")
 
 # --- Show Fixed Cost Totals in Radio Options ---
 if fixed_df is not None:
@@ -783,9 +809,9 @@ if st.session_state.get('calculation_done', False):
 else:
     st.info("Run a calculation first to enable export options.")
 
-# --- Push Matrix to Google Sheets ---
+# --- Cost matrix (for pasting into emails) ---
 st.markdown("---")
-st.subheader("📤 Push matrix to Google Sheets")
+st.subheader("📋 Cost matrix — air destinations × pallet count")
 
 matrix_product_id = str(
     st.session_state.get('last_calc_product') or selected_product or ""
@@ -793,16 +819,11 @@ matrix_product_id = str(
 
 if st.session_state.get('calculation_done', False) and selected_shipment_type == "Air" and matrix_product_id:
     st.caption(
-        "Recompute cost per box for all air destinations × {2, 4, 6, 10} pallets, "
-        "holding the rest of the current inputs constant. Preview below; click to send."
+        "Cost per box (USD), recomputed for every air destination at 2 / 4 / 6 / 10 pallets. "
+        "Other inputs (raw cost, rebate, fixed-cost mode) follow the sidebar."
     )
     try:
-        from cogs.sheets import (
-            PALLET_COUNTS,
-            build_air_matrix,
-            get_gspread_client,
-            push_matrix,
-        )
+        from cogs.matrix import PALLET_COUNTS, build_air_matrix
 
         base_inputs = {
             "selected_product": matrix_product_id,
@@ -825,46 +846,98 @@ if st.session_state.get('calculation_done', False) and selected_shipment_type ==
             "product_packing_df": product_packing_df,
         }
         matrix_df = build_air_matrix(base_inputs=base_inputs, dfs=dfs)
+        display_matrix = matrix_df.copy()
+        display_matrix.columns = [f"{int(c)} pallets" for c in display_matrix.columns]
+
         st.dataframe(
-            matrix_df.style.format("${:,.4f}"),
+            display_matrix.style.format("${:,.2f}"),
             use_container_width=True,
         )
-        st.caption(f"Cost per box in USD. Columns are pallet counts: {PALLET_COUNTS}")
 
-        if st.button("Push matrix to sheet"):
-            try:
-                client = get_gspread_client()
-                metadata = {
-                    "Date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    "Product": matrix_product_id,
-                    "Raw Cost / KG (USD)": f"{raw_cost_per_kg_try:.3f}",
-                    "Rebate %": f"{rebate_rate_input:.2f}",
-                    "Fixed Cost Mode": fixed_cost_selection,
-                    "Reporting Currency": display_currency,
-                }
-                sheet_url = st.secrets["sheet_url"]
-                pushed_url = push_matrix(
-                    client, sheet_url,
-                    product=matrix_product_id,
-                    matrix_df=matrix_df,
-                    metadata=metadata,
-                )
-                st.success(f"Pushed. Open the sheet: {pushed_url}")
-            except KeyError as e:
-                st.error(
-                    f"Missing secret: {e}. Add `sheet_url` and `[gcp_service_account]` "
-                    "to `.streamlit/secrets.toml` (see `secrets.toml.example`)."
-                )
-            except Exception as e:
-                st.error(f"Push failed: {e}")
+        with st.expander("Copy for email (tab-separated)", expanded=False):
+            st.caption(
+                f"Product: **{matrix_product_id}** · rebate **{rebate_rate_input:.1f}%** · "
+                f"raw **${raw_cost_per_kg_try:.3f}/kg** · "
+                f"{datetime.now().strftime('%Y-%m-%d')}"
+            )
+            tsv = display_matrix.reset_index().to_csv(sep="\t", index=False, float_format="%.2f")
+            st.code(tsv, language="text")
+            st.caption(
+                "Click the copy icon at the top-right of the block above. "
+                "Pasting into Gmail / Apple Mail / Outlook compose turns it into a real table."
+            )
+
+        # --- Send via Make.com webhook ---
+        st.markdown("---")
+        st.subheader("✉️ Send pricing email (via Make.com)")
+        import requests
+        from cogs.matrix import render_matrix_html
+
+        webhook_url = st.secrets.get("make_webhook_url", "") if hasattr(st, "secrets") else ""
+        if not webhook_url:
+            st.info(
+                "Add `make_webhook_url = \"https://hook.eu2.make.com/...\"` to "
+                "`.streamlit/secrets.toml` to enable. See README for the Make scenario setup."
+            )
+        else:
+            col_to, col_subj = st.columns([1, 1])
+            recipient_email = col_to.text_input(
+                "Recipient email",
+                value=st.session_state.get("last_recipient_email", ""),
+                placeholder="buyer@example.com",
+            )
+            default_subject = f"{matrix_product_id} — pricing matrix ({datetime.now():%Y-%m-%d})"
+            subject = col_subj.text_input("Subject", value=default_subject)
+            note = st.text_area(
+                "Note (prepended to email body)",
+                value="",
+                placeholder="Optional. e.g. 'As discussed, here is the latest pricing.'",
+                height=80,
+            )
+            if st.button("Send to Make"):
+                if not recipient_email or "@" not in recipient_email:
+                    st.error("Enter a valid recipient email.")
+                else:
+                    payload = {
+                        "from_app": "cogs_calculator",
+                        "date_iso": datetime.now().isoformat(timespec="seconds"),
+                        "product": matrix_product_id,
+                        "raw_cost_per_kg_usd": round(raw_cost_per_kg_try, 4),
+                        "rebate_percentage": round(rebate_rate_input, 2),
+                        "fixed_cost_mode": fixed_cost_selection,
+                        "reporting_currency": display_currency,
+                        "to_email": recipient_email,
+                        "subject": subject,
+                        "note": note,
+                        "matrix_html": render_matrix_html(display_matrix),
+                        "matrix_rows": [
+                            {"destination": dest,
+                             **{f"p{int(p)}": round(float(matrix_df.at[dest, p]), 2)
+                                for p in matrix_df.columns}}
+                            for dest in matrix_df.index
+                        ],
+                    }
+                    try:
+                        with st.spinner("Sending to Make…"):
+                            resp = requests.post(webhook_url, json=payload, timeout=15)
+                        if resp.ok:
+                            st.success(f"Sent. Make returned {resp.status_code}.")
+                            st.session_state["last_recipient_email"] = recipient_email
+                        else:
+                            st.error(
+                                f"Make returned HTTP {resp.status_code}: "
+                                f"{resp.text[:200]}"
+                            )
+                    except requests.RequestException as e:
+                        st.error(f"Request failed: {e}")
     except ValueError as e:
         st.warning(str(e))
     except Exception as e:
-        st.error(f"Could not build matrix preview: {e}")
+        st.error(f"Could not build cost matrix: {e}")
 elif st.session_state.get('calculation_done', False):
-    st.info("Matrix push is for Air shipments. Switch shipment type to Air and recalculate.")
+    st.info("Cost matrix is for Air shipments only. Switch shipment type to Air and recalculate.")
 else:
-    st.info("Run a calculation first to enable matrix push.")
+    st.info("Run a calculation first to see the cost matrix.")
 
 # --- UI Improvements and Advanced Features ---
 st.markdown("---")
