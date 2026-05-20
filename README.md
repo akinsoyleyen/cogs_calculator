@@ -17,7 +17,6 @@ A devcontainer is provided (`.devcontainer/devcontainer.json`) — open the repo
 
 - **Main calculator** (`app.py`) — pick a product, set quantity / pallets, choose fixed-cost mode, get a per-box breakdown across COGS, Logistics, Total, Summary pie, and Profit Analysis tabs.
 - **Catalogue** (`pages/1_Catalogue.py`) — inline editor for the seven CSV data files. Edit products, components, weights, packing, recipes, fixed costs, pallets, and air-freight rates without leaving the browser.
-- **FX Calculator** (`pages/2_FX_Calculator.py`) — manual currency conversion using live rates from Frankfurter.
 
 ## Theme
 

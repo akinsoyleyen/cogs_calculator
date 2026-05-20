@@ -76,7 +76,7 @@ Cover:
 - One-paragraph description (Streamlit-based COGS + Logistics calculator, single-currency USD with display FX at the end).
 - Local run: `pip install -r requirements.txt && streamlit run app.py`.
 - CSV files it reads: `components.csv`, `product_recipe.csv`, `fixed_costs.csv`, `product_weights.csv`, `air_freight_rates.csv`, `pallets.csv`, `product_packing.csv`.
-- Pages: main calculator, Catalogue cockpit (`pages/1_Catalogue.py`), Manual FX (`pages/2_FX_Calculator.py`).
+- Pages: main calculator, Catalogue cockpit (`pages/1_Catalogue.py`).
 - Theme system: `theme.py` provides `apply_theme(page)` with Light + Dark Neon options.
 - Cost model section: fixed-cost selector represents overhead allocated to *this shipment*, not the whole month.
 
