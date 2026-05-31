@@ -69,3 +69,68 @@ def test_airtable_is_configured_true(monkeypatch):
 def test_airtable_is_configured_false_when_missing(monkeypatch):
     monkeypatch.setattr(aw.st, "secrets", {"airtable_token": "patX"})
     assert aw.airtable_is_configured() is False
+
+
+import pytest
+
+
+class _FakeResp:
+    def __init__(self, ok=True, status_code=200, text="", payload=None):
+        self.ok = ok
+        self.status_code = status_code
+        self.text = text
+        self._payload = payload or {"records": []}
+
+    def json(self):
+        return self._payload
+
+
+def test_log_matrix_batches_and_posts(monkeypatch):
+    monkeypatch.setattr(aw.st, "secrets", {
+        "airtable_token": "patX",
+        "airtable_base_id": "appBASE",
+        "airtable_table": "COGS Ledger",
+    })
+    calls = []
+
+    def fake_post(url, headers=None, json=None, timeout=None):
+        calls.append({"url": url, "headers": headers, "json": json})
+        return _FakeResp(ok=True, payload={"records": json["records"]})
+
+    monkeypatch.setattr(aw.requests, "post", fake_post)
+
+    rows = [{"Destination": f"D{i}"} for i in range(11)]
+    n = aw.log_matrix(rows)
+
+    assert n == 11
+    assert len(calls) == 2  # 10 + 1
+    assert calls[0]["url"].endswith("/appBASE/COGS%20Ledger")
+    assert calls[0]["headers"]["Authorization"] == "Bearer patX"
+    assert calls[0]["json"]["typecast"] is True
+    assert len(calls[0]["json"]["records"]) == 10
+    assert calls[0]["json"]["records"][0] == {"fields": {"Destination": "D0"}}
+    assert len(calls[1]["json"]["records"]) == 1
+
+
+def test_log_matrix_empty_is_noop(monkeypatch):
+    def boom(*a, **k):
+        raise AssertionError("should not POST for empty rows")
+    monkeypatch.setattr(aw.requests, "post", boom)
+    assert aw.log_matrix([]) == 0
+
+
+def test_log_matrix_raises_on_api_error(monkeypatch):
+    monkeypatch.setattr(aw.st, "secrets", {
+        "airtable_token": "patX",
+        "airtable_base_id": "appBASE",
+        "airtable_table": "T",
+    })
+
+    def fake_post(url, headers=None, json=None, timeout=None):
+        return _FakeResp(ok=False, status_code=422, text="Unknown field name")
+
+    monkeypatch.setattr(aw.requests, "post", fake_post)
+
+    with pytest.raises(RuntimeError) as exc:
+        aw.log_matrix([{"Destination": "D0"}])
+    assert "422" in str(exc.value)

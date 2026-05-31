@@ -68,3 +68,38 @@ def build_ledger_rows(
             record[f"{int(col)} pallets"] = round(float(row[col]), 2)
         rows.append(record)
     return rows
+
+
+def _headers() -> dict:
+    return {
+        "Authorization": f"Bearer {st.secrets['airtable_token']}",
+        "Content-Type": "application/json",
+    }
+
+
+def _url() -> str:
+    base_id = st.secrets["airtable_base_id"]
+    table = st.secrets["airtable_table"]
+    return f"{_API}/{base_id}/{quote(table)}"
+
+
+def log_matrix(rows: list[dict]) -> int:
+    """Append `rows` (one dict per destination) to Airtable.
+
+    Returns the number of records written. Raises RuntimeError on API failure.
+    """
+    if not rows:
+        return 0
+    url = _url()
+    headers = _headers()
+    written = 0
+    for i in range(0, len(rows), _BATCH):
+        batch = rows[i : i + _BATCH]
+        payload = {"records": [{"fields": r} for r in batch], "typecast": True}
+        resp = requests.post(url, headers=headers, json=payload, timeout=30)
+        if not resp.ok:
+            raise RuntimeError(
+                f"Airtable write failed ({resp.status_code}): {resp.text[:300]}"
+            )
+        written += len(resp.json().get("records", batch))
+    return written
