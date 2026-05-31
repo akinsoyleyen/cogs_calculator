@@ -18,6 +18,19 @@ _API = "https://api.airtable.com/v0"
 _BATCH = 10  # Airtable accepts at most 10 records per create request.
 
 
+def airtable_is_configured() -> bool:
+    if not hasattr(st, "secrets"):
+        return False
+    try:
+        return (
+            bool(st.secrets.get("airtable_token"))
+            and bool(st.secrets.get("airtable_base_id"))
+            and bool(st.secrets.get("airtable_table"))
+        )
+    except Exception:
+        return False
+
+
 def build_ledger_rows(
     matrix_df,
     *,

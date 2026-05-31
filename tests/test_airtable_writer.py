@@ -52,3 +52,20 @@ def test_build_ledger_rows_rounds_to_cents():
     )
     assert rows[0]["2 pallets"] == 10.0  # 10.005 is ~10.00499 in IEEE-754, rounds to 10.00
     assert rows[0]["4 pallets"] == 9.0
+
+
+import cogs.airtable_writer as aw
+
+
+def test_airtable_is_configured_true(monkeypatch):
+    monkeypatch.setattr(aw.st, "secrets", {
+        "airtable_token": "patX",
+        "airtable_base_id": "appX",
+        "airtable_table": "COGS Ledger",
+    })
+    assert aw.airtable_is_configured() is True
+
+
+def test_airtable_is_configured_false_when_missing(monkeypatch):
+    monkeypatch.setattr(aw.st, "secrets", {"airtable_token": "patX"})
+    assert aw.airtable_is_configured() is False
