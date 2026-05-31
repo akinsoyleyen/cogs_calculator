@@ -90,6 +90,35 @@ Payload reference (what the webhook receives):
 }
 ```
 
+## Airtable ledger
+
+The **📌 Log to ledger** button under the Air pricing matrix appends one row per
+destination — the 2 / 4 / 6 / 10-pallet prices (sell price when a Target Profit is
+set, otherwise cost), plus product, target profit, rebate, raw cost and packing —
+to an Airtable **COGS Ledger** table. It's your accumulating big table of every
+product you've costed.
+
+A table named `COGS Ledger` already exists in the **Urun Fiyat Listesi** base
+(`appr0XTcWvQYgl6iD`). To enable the button (one-time, ~3 min):
+
+1. Generate an Airtable **personal access token** with the `data.records:write`
+   scope on that base: https://airtable.com/create/tokens
+2. Add to `.streamlit/secrets.toml` locally **and** to the Streamlit Cloud Secrets panel:
+   ```toml
+   airtable_token   = "patXXXXXXXXXXXXXX"
+   airtable_base_id = "appr0XTcWvQYgl6iD"
+   airtable_table   = "COGS Ledger"
+   ```
+3. Reload the app. Each click now logs the matrix.
+
+If the secrets are absent, the button shows a hint and does nothing — the rest of
+the app is unaffected. Each click is a fresh snapshot (no de-duplication), so the
+ledger preserves how a product's pricing moved over time. The table schema is
+documented in [docs/superpowers/specs/2026-05-31-airtable-ledger-design.md](docs/superpowers/specs/2026-05-31-airtable-ledger-design.md).
+
+Tests for the writer module live in `tests/`; run them with `pip install -r
+requirements-dev.txt` then `python -m pytest`.
+
 ## Persisting Catalogue edits on Streamlit Cloud
 
 Streamlit Cloud has an ephemeral filesystem — any `.csv` edits made through the Catalogue page are wiped when the container restarts. To make edits durable, the app commits saved CSVs back to this repo via the GitHub API. Streamlit Cloud auto-redeploys after each commit (30–60 s).
