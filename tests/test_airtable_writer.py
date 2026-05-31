@@ -43,15 +43,16 @@ def test_build_ledger_rows_one_record_per_destination():
 
 
 def test_build_ledger_rows_rounds_to_cents():
-    m = pd.DataFrame({2: [10.005], 4: [9.001], 6: [9.0], 10: [8.5]},
+    # Values chosen away from any .xx5 midpoint so the result is platform-independent.
+    m = pd.DataFrame({2: [10.347], 4: [9.002], 6: [9.0], 10: [8.5]},
                      index=pd.Index(["BAH-TK"], name="Destination"))
     rows = build_ledger_rows(
         m, product="P", price_basis="Cost", target_profit_percent=0.0,
         raw_cost_per_kg=1.0, rebate_percentage=0.0, fixed_cost_mode="standard",
         boxes_per_pallet=100, logged_at_iso="2026-05-31T00:00:00", batch_id="b",
     )
-    assert rows[0]["2 pallets"] == 10.0  # 10.005 is ~10.00499 in IEEE-754, rounds to 10.00
-    assert rows[0]["4 pallets"] == 9.0
+    assert rows[0]["2 pallets"] == 10.35  # rounds up
+    assert rows[0]["4 pallets"] == 9.0    # rounds down
 
 
 import cogs.airtable_writer as aw
