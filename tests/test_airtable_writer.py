@@ -1,5 +1,7 @@
 import pandas as pd
+import pytest
 
+import cogs.airtable_writer as aw
 from cogs.airtable_writer import build_ledger_rows
 
 
@@ -55,9 +57,6 @@ def test_build_ledger_rows_rounds_to_cents():
     assert rows[0]["4 pallets"] == 9.0    # rounds down
 
 
-import cogs.airtable_writer as aw
-
-
 def test_airtable_is_configured_true(monkeypatch):
     monkeypatch.setattr(aw.st, "secrets", {
         "airtable_token": "patX",
@@ -70,9 +69,6 @@ def test_airtable_is_configured_true(monkeypatch):
 def test_airtable_is_configured_false_when_missing(monkeypatch):
     monkeypatch.setattr(aw.st, "secrets", {"airtable_token": "patX"})
     assert aw.airtable_is_configured() is False
-
-
-import pytest
 
 
 class _FakeResp:
@@ -135,3 +131,30 @@ def test_log_matrix_raises_on_api_error(monkeypatch):
     with pytest.raises(RuntimeError) as exc:
         aw.log_matrix([{"Destination": "D0"}])
     assert "422" in str(exc.value)
+
+
+def test_log_matrix_reports_partial_count_when_later_batch_fails(monkeypatch):
+    # The normal ~11-destination load is two batches (10 + 1). If the first
+    # batch lands and the second fails, the error must say how many rows wrote
+    # so the user knows a retry would duplicate them.
+    monkeypatch.setattr(aw.st, "secrets", {
+        "airtable_token": "patX",
+        "airtable_base_id": "appBASE",
+        "airtable_table": "T",
+    })
+    seen = {"n": 0}
+
+    def fake_post(url, headers=None, json=None, timeout=None):
+        seen["n"] += 1
+        if seen["n"] == 1:
+            return _FakeResp(ok=True, payload={"records": json["records"]})
+        return _FakeResp(ok=False, status_code=429, text="Rate limited")
+
+    monkeypatch.setattr(aw.requests, "post", fake_post)
+
+    rows = [{"Destination": f"D{i}"} for i in range(11)]
+    with pytest.raises(RuntimeError) as exc:
+        aw.log_matrix(rows)
+    msg = str(exc.value)
+    assert "after 10" in msg  # first batch of 10 landed before batch 2 failed
+    assert "429" in msg

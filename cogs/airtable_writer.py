@@ -11,6 +11,7 @@ Requires three secrets in .streamlit/secrets.toml:
 """
 from urllib.parse import quote
 
+import pandas as pd
 import requests
 import streamlit as st
 
@@ -32,18 +33,18 @@ def airtable_is_configured() -> bool:
 
 
 def build_ledger_rows(
-    matrix_df,
+    matrix_df: pd.DataFrame,
     *,
-    product,
-    price_basis,
-    target_profit_percent,
-    raw_cost_per_kg,
-    rebate_percentage,
-    fixed_cost_mode,
-    boxes_per_pallet,
-    logged_at_iso,
-    batch_id,
-):
+    product: str,
+    price_basis: str,
+    target_profit_percent: float,
+    raw_cost_per_kg: float,
+    rebate_percentage: float,
+    fixed_cost_mode: str,
+    boxes_per_pallet: int,
+    logged_at_iso: str,
+    batch_id: str,
+) -> list[dict]:
     """Turn an active pricing matrix into one Airtable record dict per destination.
 
     matrix_df: index = destination names, columns = pallet counts (2,4,6,10),
@@ -99,7 +100,8 @@ def log_matrix(rows: list[dict]) -> int:
         resp = requests.post(url, headers=headers, json=payload, timeout=30)
         if not resp.ok:
             raise RuntimeError(
-                f"Airtable write failed ({resp.status_code}): {resp.text[:300]}"
+                f"Airtable write failed after {written} of {len(rows)} rows "
+                f"({resp.status_code}): {resp.text[:300]}"
             )
-        written += len(resp.json().get("records", batch))
+        written += len(batch)
     return written
