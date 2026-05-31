@@ -985,6 +985,46 @@ if st.session_state.get('calculation_done', False) and selected_shipment_type ==
                 "Pasting into Gmail / Apple Mail / Outlook compose turns it into a real table."
             )
 
+        # --- Log to ledger (Airtable) ---
+        st.markdown("---")
+        st.subheader("📌 Log to ledger (Airtable)")
+        from cogs.airtable_writer import (
+            airtable_is_configured,
+            build_ledger_rows,
+            log_matrix,
+        )
+
+        if not airtable_is_configured():
+            st.info(
+                "Add `airtable_token`, `airtable_base_id`, and `airtable_table` to "
+                "`.streamlit/secrets.toml` to enable one-click logging. See README."
+            )
+        else:
+            st.caption(
+                "Logs one row per destination (with 2/4/6/10-pallet "
+                f"{'sell prices' if _matrix_is_sell else 'costs'}) to the COGS Ledger."
+            )
+            if st.button("Log matrix to ledger"):
+                try:
+                    _now = datetime.now()
+                    _rows_out = build_ledger_rows(
+                        active_matrix_df,
+                        product=matrix_product_id,
+                        price_basis="Sell price" if _matrix_is_sell else "Cost",
+                        target_profit_percent=round(float(target_profit_percent), 2),
+                        raw_cost_per_kg=round(float(raw_cost_per_kg_try), 4),
+                        rebate_percentage=round(float(rebate_rate_input), 2),
+                        fixed_cost_mode=fixed_cost_mode,
+                        boxes_per_pallet=_bpp,
+                        logged_at_iso=_now.isoformat(timespec="seconds"),
+                        batch_id=f"{_now:%Y-%m-%d %H:%M} · {matrix_product_id}",
+                    )
+                    with st.spinner("Logging to Airtable…"):
+                        _n = log_matrix(_rows_out)
+                    st.success(f"Logged {_n} rows to the ledger.")
+                except Exception as e:
+                    st.error(f"Could not log to ledger: {e}")
+
         # --- Send via Make.com webhook ---
         st.markdown("---")
         st.subheader("✉️ Send pricing email (via Make.com)")
