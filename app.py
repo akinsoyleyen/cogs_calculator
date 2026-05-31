@@ -1016,7 +1016,7 @@ if st.session_state.get('calculation_done', False) and selected_shipment_type ==
                         rebate_percentage=round(float(rebate_rate_input), 2),
                         fixed_cost_mode=fixed_cost_mode,
                         boxes_per_pallet=_bpp,
-                        logged_at_iso=_now.isoformat(timespec="seconds"),
+                        logged_at_iso=_now.astimezone().isoformat(timespec="seconds"),
                         batch_id=f"{_now:%Y-%m-%d %H:%M} · {matrix_product_id}",
                     )
                     with st.spinner("Logging to Airtable…"):
