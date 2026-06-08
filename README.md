@@ -17,6 +17,7 @@ A devcontainer is provided (`.devcontainer/devcontainer.json`) — open the repo
 
 - **Main calculator** (`app.py`) — pick a product, set quantity / pallets, choose fixed-cost mode, get a per-box breakdown across COGS, Logistics, Total, Summary pie, and Profit Analysis tabs.
 - **Catalogue** (`pages/1_Catalogue.py`) — inline editor for the seven CSV data files. Edit products, components, weights, packing, recipes, fixed costs, pallets, and air-freight rates without leaving the browser.
+- **Season Pricing** (`pages/2_Season_Pricing.py`) — type one raw price per fruit; the app fans each priced fruit out across all its pack types and air destinations, builds the matrix for each, stacks the lot into one table, and logs it to the Airtable ledger in one click. See "Season pricing" below.
 
 ## Theme
 
@@ -35,6 +36,7 @@ All CSVs live at the repo root. Edit them through the Catalogue page or directly
 | `fixed_costs.csv` | Per-batch overhead options (Primary, Secondary, etc.). See "Cost model" below. |
 | `pallets.csv` | Pallet weights and per-pallet cost. |
 | `air_freight_rates.csv` | Tiered air-freight pricing per destination, by minimum chargeable weight. |
+| `product_groups.csv` | Maps each pack type (ProductID) to its produce family and an `AirEligible` flag. Drives the Season Pricing page; editable inline there. |
 
 ## Cost model
 
@@ -118,6 +120,29 @@ documented in [docs/superpowers/specs/2026-05-31-airtable-ledger-design.md](docs
 
 Tests for the writer module live in `tests/`; run them with `pip install -r
 requirements-dev.txt` then `python -m pytest`.
+
+## Season pricing
+
+When you receive one raw price for a fruit (say Cherry), you usually need every pack
+type's landed cost at once — and in stone-fruit season several fruits land together. The
+**Season Pricing** page (`pages/2_Season_Pricing.py`) turns one price per fruit into the
+full grid:
+
+1. Set the shipment assumptions once (fixed-cost mode, target profit, rebate, interest,
+   pallet type, variable costs) — they apply to the whole batch.
+2. In the **Raw prices** table, type the TRY/kg price for each fruit in season; it's
+   live-converted to USD like the main calculator.
+3. The app expands each priced fruit into its pack types (air-eligible ones by default),
+   recomputes the destination × {2,4,6,10}-pallet matrix for each, and stacks everything
+   into one table you can copy or **Log all to ledger**.
+
+Pack type → fruit grouping lives in `product_groups.csv` and is editable inline under
+**Edit produce grouping**. The `AirEligible` flag keeps Container/Truck-only variants (the
+`(Container/Truck)` Pomegranate and `360kg` Watermelon rows) out of the air sweep so they
+never produce a bogus air price; flip the inline checkbox to include them for a one-off
+run. The ledger push reuses the existing COGS Ledger schema — one row per
+(pack type × destination), with `Product` = the pack type and `Raw $/kg` = the fruit's
+price — so no Airtable changes are needed.
 
 ## Persisting Catalogue edits on Streamlit Cloud
 

@@ -57,6 +57,32 @@ def test_build_ledger_rows_rounds_to_cents():
     assert rows[0]["4 pallets"] == 9.0    # rounds down
 
 
+def test_build_ledger_rows_concatenated_across_products():
+    # The Season Pricing page logs many pack types in one batch by concatenating
+    # build_ledger_rows per product. Product + raw cost must travel per row.
+    rows = []
+    for product, raw in (("Cherry 10 x 500g", 3.5), ("Apricot 16 x 350g", 2.8)):
+        rows.extend(
+            build_ledger_rows(
+                _matrix(),
+                product=product,
+                price_basis="Cost",
+                target_profit_percent=0.0,
+                raw_cost_per_kg=raw,
+                rebate_percentage=0.0,
+                fixed_cost_mode="standard",
+                boxes_per_pallet=100,
+                logged_at_iso="2026-06-08T12:00:00",
+                batch_id="2026-06-08 12:00 · season lot",
+            )
+        )
+
+    assert len(rows) == 4  # 2 products × 2 destinations
+    assert {r["Product"] for r in rows} == {"Cherry 10 x 500g", "Apricot 16 x 350g"}
+    cherry = [r for r in rows if r["Product"] == "Cherry 10 x 500g"]
+    assert all(r["Raw $/kg"] == 3.5 for r in cherry)
+
+
 def test_airtable_is_configured_true(monkeypatch):
     monkeypatch.setattr(aw.st, "secrets", {
         "airtable_token": "patX",

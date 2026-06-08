@@ -17,6 +17,7 @@ WEIGHTS_CSV = "product_weights.csv"
 AIR_RATES_CSV = "air_freight_rates.csv"
 PALLETS_CSV = "pallets.csv"
 PACKING_CSV = "product_packing.csv"
+GROUPS_CSV = "product_groups.csv"
 
 INTEREST_COST_ITEM_NAME = "Calc. Interest"
 

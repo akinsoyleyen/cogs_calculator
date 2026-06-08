@@ -103,3 +103,76 @@ def build_air_matrix(
 
     matrix.index.name = "Destination"
     return matrix
+
+
+def build_air_matrices(
+    *,
+    product_ids: list[str],
+    raw_cost_per_kg_usd_by_product: dict[str, float],
+    base_common: dict,
+    dfs: dict,
+    pallet_counts: tuple[int, ...] = PALLET_COUNTS,
+) -> tuple[dict[str, pd.DataFrame], dict[str, str]]:
+    """Build one air matrix per product, reusing `build_air_matrix`.
+
+    base_common: the calculator inputs shared by every product — i.e. everything
+    in a `build_air_matrix` base_inputs EXCEPT `selected_product` and
+    `raw_cost_per_kg_usd`, which are injected per product here. A fresh
+    base_inputs dict is built each iteration (never mutate a shared one).
+
+    Returns ({product_id: matrix_df}, {product_id: error_message}). A product
+    that fails (missing weight, missing Boxes/Pallet, …) is recorded in the error
+    map instead of aborting the whole batch.
+    """
+    matrices: dict[str, pd.DataFrame] = {}
+    errors: dict[str, str] = {}
+    for pid in product_ids:
+        try:
+            base_inputs = {
+                **base_common,
+                "selected_product": pid,
+                "raw_cost_per_kg_usd": float(raw_cost_per_kg_usd_by_product[pid]),
+            }
+            matrices[pid] = build_air_matrix(
+                base_inputs=base_inputs, dfs=dfs, pallet_counts=pallet_counts
+            )
+        except (ValueError, KeyError) as e:
+            errors[pid] = str(e)
+    return matrices, errors
+
+
+def matrices_to_long(
+    matrices: dict[str, pd.DataFrame],
+    *,
+    produce_of: dict[str, str],
+    boxes_per_pallet_of: dict[str, int] | None = None,
+    multiplier: float = 1.0,
+) -> pd.DataFrame:
+    """Stack per-product destination×pallet matrices into one tidy/long frame.
+
+    Columns: [Produce, Pack type, (Boxes/pallet,) Destination, "<N> pallets"…].
+    Values are cost × `multiplier` (the 1 + profit% markup; 1.0 leaves cost as
+    is), rounded to 2 dp — mirroring the single-product sell matrix in app.py.
+    Row order follows `matrices` insertion order, then destination order.
+    """
+    rows = []
+    for pid, matrix in matrices.items():
+        produce = produce_of.get(pid, "")
+        for dest, mrow in matrix.iterrows():
+            record = {"Produce": produce, "Pack type": pid}
+            if boxes_per_pallet_of is not None:
+                record["Boxes/pallet"] = boxes_per_pallet_of.get(pid)
+            record["Destination"] = str(dest)
+            for col in matrix.columns:
+                record[f"{int(col)} pallets"] = round(float(mrow[col]) * multiplier, 2)
+            rows.append(record)
+
+    # Stable column order, even when there are no matrices/rows.
+    cols = ["Produce", "Pack type"]
+    if boxes_per_pallet_of is not None:
+        cols.append("Boxes/pallet")
+    cols.append("Destination")
+    for matrix in matrices.values():
+        cols += [f"{int(c)} pallets" for c in matrix.columns]
+        break
+    return pd.DataFrame(rows, columns=cols)
