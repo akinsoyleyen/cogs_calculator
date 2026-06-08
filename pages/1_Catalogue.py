@@ -6,6 +6,7 @@ import streamlit as st
 
 from theme import apply_theme
 from cogs.github_writer import github_is_configured, push_paths
+from cogs.produce import reconcile_groups
 
 
 def _persist_to_github(paths: list[str], label: str) -> None:
@@ -39,6 +40,7 @@ PACKING_CSV = "product_packing.csv"
 PALLETS_CSV = "pallets.csv"
 FIXED_CSV = "fixed_costs.csv"
 AIR_RATES_CSV = "air_freight_rates.csv"
+GROUPS_CSV = "product_groups.csv"
 
 st.set_page_config(page_title="Catalogue — Ledger", layout="wide", page_icon="◐")
 
@@ -103,6 +105,11 @@ with tabs[0]:
     packing_df = load_csv(PACKING_CSV, ["ProductID", "BoxesPerPallet"])
     recipe_df = load_csv(RECIPE_CSV, ["ProductID", "ComponentName", "QuantityPerProduct"])
     components_df = load_csv(COMPONENTS_CSV, ["ComponentName", "CostPerUnit", "WeightKG"])
+    groups_df = (
+        load_csv(GROUPS_CSV, ["ProductID", "Produce"])
+        if os.path.exists(GROUPS_CSV)
+        else pd.DataFrame(columns=["ProductID", "Produce", "AirEligible"])
+    )
 
     component_options = sorted(clean_str_col(components_df["ComponentName"]).unique().tolist())
 
@@ -113,14 +120,23 @@ with tabs[0]:
 
     merged = weights_df.merge(packing_df, on="ProductID", how="outer")
     merged = merged[["ProductID", "NetWeightKG", "BoxesPerPallet"]]
+    # Bring in the produce family + air-eligibility (seeding any missing/new IDs).
+    groups_aligned = reconcile_groups(groups_df, merged["ProductID"].tolist())
+    merged = merged.merge(groups_aligned, on="ProductID", how="left")
+    merged = merged[["ProductID", "Produce", "NetWeightKG", "BoxesPerPallet", "AirEligible"]]
 
-    col_top_a, col_top_b, col_top_c = st.columns([1, 1, 1])
-    col_top_a.metric("Products", f"{merged['ProductID'].nunique()}")
-    col_top_b.metric("Components in use", f"{recipe_df['ComponentName'].nunique()}")
-    col_top_c.metric("Recipe lines", f"{len(recipe_df)}")
+    col_a, col_b, col_c, col_d = st.columns(4)
+    col_a.metric("Products", f"{merged['ProductID'].nunique()}")
+    col_b.metric("Produce families", f"{merged['Produce'].nunique()}")
+    col_c.metric("Components in use", f"{recipe_df['ComponentName'].nunique()}")
+    col_d.metric("Recipe lines", f"{len(recipe_df)}")
 
     st.subheader("Products master list")
-    st.caption("Edit cells directly. Use the + row at the bottom to add, or tick the trash icon to remove.")
+    st.caption(
+        "Edit cells directly. **Produce** is the fruit each pack type is priced under on "
+        "the Season Pricing page — leave it blank to auto-guess from the name on save. "
+        "Use the + row at the bottom to add, or tick the trash icon to remove."
+    )
     edited_products = st.data_editor(
         merged,
         num_rows="dynamic",
@@ -128,11 +144,21 @@ with tabs[0]:
         hide_index=True,
         column_config={
             "ProductID": st.column_config.TextColumn("Product ID", required=True, width="large"),
+            "Produce": st.column_config.TextColumn(
+                "Produce (fruit)", width="medium",
+                help="Fruit family for the Season Pricing page (e.g. 'Cherry 16 x 350g' → 'Cherry'). "
+                     "Blank = auto-guessed from the name on save.",
+            ),
             "NetWeightKG": st.column_config.NumberColumn(
                 "Net weight (kg)", min_value=0.0, step=0.1, format="%.3f", required=True
             ),
             "BoxesPerPallet": st.column_config.NumberColumn(
                 "Boxes per pallet", min_value=1, step=1, format="%d", required=True
+            ),
+            "AirEligible": st.column_config.CheckboxColumn(
+                "Air-eligible", default=True,
+                help="Off for Container/Truck-only variants so they're left out of the Season "
+                     "air matrix by default.",
             ),
         },
         key="products_editor",
@@ -155,6 +181,14 @@ with tabs[0]:
                 save_csv(weights_out, WEIGHTS_CSV, decimal_char=",")
                 save_csv(packing_out, PACKING_CSV)
 
+                # Produce grouping: reconcile fills blank Produce (auto-guess) and
+                # normalises Air-eligible, so the editor is the full source of truth.
+                groups_out = reconcile_groups(
+                    cleaned[["ProductID", "Produce", "AirEligible"]],
+                    cleaned["ProductID"].tolist(),
+                )
+                save_csv(groups_out, GROUPS_CSV)
+
                 kept_ids = set(cleaned["ProductID"].tolist())
                 recipe_cleaned = recipe_df[recipe_df["ProductID"].isin(kept_ids)].copy()
                 save_csv(recipe_cleaned, RECIPE_CSV)
@@ -163,7 +197,7 @@ with tabs[0]:
                     f"Saved {len(cleaned)} products. "
                     f"Recipes for removed products were dropped."
                 )
-                _persist_to_github([WEIGHTS_CSV, PACKING_CSV, RECIPE_CSV], "products")
+                _persist_to_github([WEIGHTS_CSV, PACKING_CSV, RECIPE_CSV, GROUPS_CSV], "products")
                 st.rerun()
             except Exception as e:
                 st.error(f"Failed to write CSVs: {e}")

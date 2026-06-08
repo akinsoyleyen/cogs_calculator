@@ -16,7 +16,7 @@ A devcontainer is provided (`.devcontainer/devcontainer.json`) — open the repo
 ## Pages
 
 - **Main calculator** (`app.py`) — pick a product, set quantity / pallets, choose fixed-cost mode, get a per-box breakdown across COGS, Logistics, Total, Summary pie, and Profit Analysis tabs.
-- **Catalogue** (`pages/1_Catalogue.py`) — inline editor for the seven CSV data files. Edit products, components, weights, packing, recipes, fixed costs, pallets, and air-freight rates without leaving the browser.
+- **Catalogue** (`pages/1_Catalogue.py`) — inline editor for the CSV data files. Edit products (including each pack type's produce family and air-eligibility), components, weights, packing, recipes, fixed costs, pallets, and air-freight rates without leaving the browser.
 - **Season Pricing** (`pages/2_Season_Pricing.py`) — type one raw price per fruit; the app fans each priced fruit out across all its pack types and air destinations, builds the matrix for each, stacks the lot into one table, and logs it to the Airtable ledger in one click. See "Season pricing" below.
 
 ## Theme
@@ -138,7 +138,8 @@ full grid:
    it), copy as tab-separated text, or **Log all to ledger**.
 
 Pack type → fruit grouping lives in `product_groups.csv` and is editable inline under
-**Edit produce grouping**. The `AirEligible` flag keeps Container/Truck-only variants (the
+**Edit produce grouping** here, or in the **Catalogue → Products** tab (the *Produce* and
+*Air-eligible* columns). The `AirEligible` flag keeps Container/Truck-only variants (the
 `(Container/Truck)` Pomegranate and `360kg` Watermelon rows) out of the air sweep so they
 never produce a bogus air price; flip the inline checkbox to include them for a one-off
 run. The ledger push reuses the existing COGS Ledger schema — one row per
