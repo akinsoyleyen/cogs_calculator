@@ -27,6 +27,7 @@ from cogs.data_loader import (
 )
 from cogs.produce import reconcile_groups
 from cogs.matrix import build_air_matrices, matrices_to_long
+from cogs.exporters import season_matrix_to_excel
 from cogs.airtable_writer import airtable_is_configured, build_ledger_rows, log_matrix
 from cogs.github_writer import github_is_configured, push_paths
 
@@ -299,6 +300,8 @@ if build_clicked:
         "produce_of": produce_of,
         "bpp_of": bpp_of,
         "usd_by_produce": usd_by_produce,
+        "try_by_produce": dict(try_by_produce),
+        "fx_rate": fx_rate,
         "built_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
     }
 
@@ -314,14 +317,67 @@ if res and not res["long"].empty:
     )
     long_df = res["long"]
     pallet_cols = [c for c in long_df.columns if c.endswith("pallets")]
+
+    # Filters — narrow the view for easier recognition. Empty = show everything.
+    f1, f2, f3 = st.columns(3)
+    sel_produce = f1.multiselect(
+        "Filter produce", sorted(long_df["Produce"].unique()),
+        default=[], placeholder="All fruits",
+    )
+    sel_packs = f2.multiselect(
+        "Filter pack type", sorted(long_df["Pack type"].unique()),
+        default=[], placeholder="All pack types",
+    )
+    sel_dests = f3.multiselect(
+        "Filter destination", sorted(long_df["Destination"].unique()),
+        default=[], placeholder="All destinations",
+    )
+    view = long_df
+    if sel_produce:
+        view = view[view["Produce"].isin(sel_produce)]
+    if sel_packs:
+        view = view[view["Pack type"].isin(sel_packs)]
+    if sel_dests:
+        view = view[view["Destination"].isin(sel_dests)]
+
+    if len(view) != len(long_df):
+        st.caption(f"Showing **{len(view)}** of {len(long_df)} rows.")
     st.dataframe(
-        long_df.style.format({c: "${:,.2f}" for c in pallet_cols}),
+        view.style.format({c: "${:,.2f}" for c in pallet_cols}),
         hide_index=True,
         use_container_width=True,
     )
 
+    # Excel / TSV follow the filtered view; the inputs sheet lists only its fruits.
+    view_produce = [p for p in res["usd_by_produce"] if p in set(view["Produce"])]
+    inputs_df = pd.DataFrame(
+        {
+            "Produce": view_produce,
+            "Raw TRY/kg": [res.get("try_by_produce", {}).get(p) for p in view_produce],
+            "Raw USD/kg": [round(res["usd_by_produce"][p], 4) for p in view_produce],
+        }
+    )
+    dl, note = st.columns([1, 2])
+    dl.download_button(
+        "⬇️ Download Excel (.xlsx)",
+        data=season_matrix_to_excel(
+            view,
+            price_basis=res["price_basis"],
+            built_at=res["built_at"],
+            inputs_df=inputs_df,
+        ),
+        file_name=f"season_pricing_{datetime.now():%Y-%m-%d}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        help="Matrix on sheet 1 (current filter), the raw prices behind it on sheet 2.",
+        disabled=view.empty,
+    )
+    note.caption(
+        "Excel and the copy block below follow the filter above. "
+        "**Log all to ledger** logs every built pack type regardless of the filter."
+    )
+
     with st.expander("Copy for spreadsheet (tab-separated)", expanded=False):
-        st.code(long_df.to_csv(sep="\t", index=False, float_format="%.2f"), language="text")
+        st.code(view.to_csv(sep="\t", index=False, float_format="%.2f"), language="text")
         st.caption("Click the copy icon, then paste into Excel / Google Sheets / an email.")
 
     if res["errors"]:

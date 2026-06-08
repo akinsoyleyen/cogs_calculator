@@ -134,7 +134,8 @@ full grid:
    live-converted to USD like the main calculator.
 3. The app expands each priced fruit into its pack types (air-eligible ones by default),
    recomputes the destination × {2,4,6,10}-pallet matrix for each, and stacks everything
-   into one table you can copy or **Log all to ledger**.
+   into one table you can **download as Excel** (`.xlsx`, matrix + the raw prices behind
+   it), copy as tab-separated text, or **Log all to ledger**.
 
 Pack type → fruit grouping lives in `product_groups.csv` and is editable inline under
 **Edit produce grouping**. The `AirEligible` flag keeps Container/Truck-only variants (the

@@ -6,6 +6,7 @@ from datetime import datetime
 import pandas as pd
 import streamlit as st
 from openpyxl import Workbook
+from openpyxl.styles import Font
 
 from cogs.formatters import format_cost
 
@@ -91,6 +92,56 @@ def create_excel_export(summary_data_dict, profit_data, calculation_details, sen
                 ws_profit.append([row[header] for header in headers])
 
     return wb
+
+
+def season_matrix_to_excel(long_df, *, price_basis="Cost", built_at="", inputs_df=None) -> bytes:
+    """Render the Season Pricing long table to .xlsx bytes for st.download_button.
+
+    Sheet "Season pricing" is the matrix with a bold, frozen header row and a
+    currency format on the per-pallet columns. Sheet "Run info" records the price
+    basis, build timestamp, and (optionally) the raw price behind each fruit so
+    the export is self-documenting. UI-free so it is unit-testable.
+    """
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Season pricing"
+
+    cols = list(long_df.columns)
+    ws.append(cols)
+    for cell in ws[1]:
+        cell.font = Font(bold=True)
+
+    for _, row in long_df.iterrows():
+        ws.append([row[c] for c in cols])
+
+    price_idx = [i for i, c in enumerate(cols, start=1) if str(c).endswith("pallets")]
+    for ci in price_idx:
+        for ri in range(2, ws.max_row + 1):
+            ws.cell(row=ri, column=ci).number_format = '"$"#,##0.00'
+
+    ws.freeze_panes = "A2"
+    for ci, c in enumerate(cols, start=1):
+        body_widths = [len(str(v)) for v in long_df[c]] if len(long_df) else []
+        width = max([len(str(c))] + body_widths)
+        ws.column_dimensions[ws.cell(row=1, column=ci).column_letter].width = min(max(width + 2, 10), 42)
+
+    info = wb.create_sheet("Run info")
+    info.append(["Season pricing export"])
+    info["A1"].font = Font(bold=True)
+    info.append(["Price basis", price_basis])
+    info.append(["Built", built_at])
+    info.append(["Rows", len(long_df)])
+    if inputs_df is not None and len(inputs_df):
+        info.append([])
+        info.append(list(inputs_df.columns))
+        for cell in info[info.max_row]:
+            cell.font = Font(bold=True)
+        for _, row in inputs_df.iterrows():
+            info.append([row[c] for c in inputs_df.columns])
+
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    return buffer.getvalue()
 
 
 def get_download_link(data, filename, file_type):
