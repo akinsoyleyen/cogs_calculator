@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import os
+import re
 from datetime import datetime
 import pandas as pd
 import streamlit as st
@@ -73,6 +74,52 @@ def dedupe_blank_rows(df, key_col):
     df[key_col] = clean_str_col(df[key_col])
     df = df[df[key_col] != ""]
     return df
+
+
+def parse_pep_list(text, carrier_suffix, airway_bill):
+    """Turn a pasted PEP price list into tiered air-rate rows.
+
+    A PEP list is one destination per line: an IATA code followed by a
+    small-weight rate (Q100) and a large-weight rate (Q1000), e.g.::
+
+        SIN 2,4 2,2
+
+    Each line becomes two tiers — MinWeightKG 0 (Q100) and 999 (Q1000) —
+    with the carrier suffix appended (``SIN`` → ``SIN-TK``) and a flat
+    airway bill. Decimals may be written with a comma or a dot. Header,
+    date and any other non-IATA lines are ignored; lines that look like a
+    destination but carry no rate are returned as ``skipped``.
+    """
+    suffix = (carrier_suffix or "").strip().upper()
+    tail = f"-{suffix}" if suffix else ""
+    rows, skipped = [], []
+    for raw in text.splitlines():
+        tokens = raw.strip().split()
+        if not tokens:
+            continue
+        code = tokens[0].upper()
+        if not re.fullmatch(r"[A-Z]{2,4}", code):
+            continue  # header row, date range, or stray text
+        nums = []
+        for tok in tokens[1:]:
+            try:
+                nums.append(float(tok.replace(",", ".")))
+            except ValueError:
+                pass
+        if not nums:
+            skipped.append(code)
+            continue
+        q100 = nums[0]
+        q1000 = nums[1] if len(nums) > 1 else nums[0]
+        dest = f"{code}{tail}"
+        rows.append({"Destination": dest, "MinWeightKG": 0.0,
+                     "PricePerKG_USD": q100, "AirwayBill_USD": airway_bill})
+        rows.append({"Destination": dest, "MinWeightKG": 999.0,
+                     "PricePerKG_USD": q1000, "AirwayBill_USD": airway_bill})
+    parsed = pd.DataFrame(
+        rows, columns=["Destination", "MinWeightKG", "PricePerKG_USD", "AirwayBill_USD"]
+    )
+    return parsed, skipped
 
 
 # --- Masthead ---
@@ -401,6 +448,82 @@ with tabs[4]:
         AIR_RATES_CSV,
         ["Destination", "MinWeightKG", "PricePerKG_USD", "AirwayBill_USD"],
     )
+
+    # ---- Bulk import from a PEP price list -----------------------------------
+    with st.expander("⬆ Bulk import from a PEP price list", expanded=False):
+        st.caption(
+            "Paste the airline's PEP list — one destination per line, e.g. "
+            "`SIN 2,4 2,2` (IATA · Q100 · Q1000). Each line becomes two tiers "
+            "(0 kg = Q100, 999 kg = Q1000). Comma or dot decimals both work; "
+            "header and date lines are ignored."
+        )
+        pep_text = st.text_area(
+            "PEP list", height=160, key="pep_text",
+            placeholder="ALA 2,2 1,9\nAMM 2 1,8\nAMS 1,9 1,7\n…",
+        )
+        c1, c2, c3 = st.columns([1, 1, 2])
+        with c1:
+            pep_suffix = st.text_input("Carrier suffix", value="TK", key="pep_suffix")
+        with c2:
+            pep_awb = st.number_input(
+                "Airway bill (USD)", min_value=0.0, value=115.5, step=1.0,
+                format="%.2f", key="pep_awb",
+            )
+        with c3:
+            pep_mode = st.radio(
+                "On import",
+                ["Replace all rates", "Merge / update destinations"],
+                key="pep_mode",
+                help="Replace wipes the table. Merge updates the tiers for "
+                     "destinations in the paste and keeps every other row.",
+            )
+
+        if st.button("Preview import", key="pep_preview_btn"):
+            parsed, skipped = parse_pep_list(pep_text, pep_suffix, pep_awb)
+            st.session_state["pep_parsed"] = parsed
+            st.session_state["pep_skipped"] = skipped
+
+        parsed = st.session_state.get("pep_parsed")
+        if parsed is not None:
+            if parsed.empty:
+                st.warning("Nothing parsed — check the pasted text.")
+            else:
+                dests = parsed["Destination"].nunique()
+                st.success(f"Parsed {dests} destinations → {len(parsed)} tier rows.")
+                skipped = st.session_state.get("pep_skipped") or []
+                if skipped:
+                    st.warning("No rate found for: " + ", ".join(skipped))
+                st.dataframe(parsed, use_container_width=True, hide_index=True)
+                bc1, bc2 = st.columns([1, 1])
+                if bc1.button("Confirm & save", key="pep_confirm"):
+                    # PEP lists only carry the 0 kg (Q100) and 999 kg (Q1000)
+                    # tiers; any other tier (e.g. a negotiated 4999 kg rate) is
+                    # preserved so it isn't silently wiped on import.
+                    pep_tiers = {0.0, 999.0}
+                    incoming = set(parsed["Destination"])
+                    extras = air_df[~air_df["MinWeightKG"].isin(pep_tiers)]
+                    if pep_mode.startswith("Replace"):
+                        extras = extras[extras["Destination"].isin(incoming)]
+                        final = pd.concat([parsed, extras], ignore_index=True)
+                    else:
+                        drop = air_df["Destination"].isin(incoming) & air_df["MinWeightKG"].isin(pep_tiers)
+                        final = pd.concat([air_df[~drop], parsed], ignore_index=True)
+                    final = final.sort_values(
+                        ["Destination", "MinWeightKG"]
+                    ).reset_index(drop=True)
+                    try:
+                        save_csv(final, AIR_RATES_CSV)
+                        st.success(f"Imported — {len(final)} air-rate tiers saved.")
+                        _persist_to_github([AIR_RATES_CSV], "air freight rates (PEP import)")
+                        st.session_state.pop("pep_parsed", None)
+                        st.session_state.pop("pep_skipped", None)
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Failed to write `{AIR_RATES_CSV}`: {e}")
+                if bc2.button("Cancel", key="pep_cancel"):
+                    st.session_state.pop("pep_parsed", None)
+                    st.session_state.pop("pep_skipped", None)
+                    st.rerun()
 
     st.subheader("Air freight rates")
     st.caption("Tiered rates per destination. The calculator picks the tier matching the shipment's gross weight.")
