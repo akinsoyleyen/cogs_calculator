@@ -196,7 +196,7 @@ edited_prices = st.data_editor(
     key="season_price_editor",
     column_config={
         "Produce": st.column_config.TextColumn("Produce (fruit)", disabled=True, width="large"),
-        "Raw price (TRY/kg)": st.column_config.NumberColumn("Raw price (TRY/kg)", min_value=0.0, step=1.0, format="%.2f"),
+        "Raw price (TRY/kg)": st.column_config.NumberColumn("Raw price (TRY/kg)", min_value=0.0, step=0.01, format="%.2f"),
         "Pack types": st.column_config.NumberColumn("Pack types", disabled=True, format="%d", width="small"),
     },
 )
