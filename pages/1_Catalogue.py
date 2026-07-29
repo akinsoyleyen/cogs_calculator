@@ -197,7 +197,7 @@ with tabs[0]:
                      "Blank = auto-guessed from the name on save.",
             ),
             "NetWeightKG": st.column_config.NumberColumn(
-                "Net weight (kg)", min_value=0.0, step=0.1, format="%.3f", required=True
+                "Net weight (kg)", min_value=0.0, step=0.001, format="%.3f", required=True
             ),
             "BoxesPerPallet": st.column_config.NumberColumn(
                 "Boxes per pallet", min_value=1, step=1, format="%d", required=True
