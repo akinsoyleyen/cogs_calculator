@@ -6,6 +6,7 @@ import pandas as pd
 import streamlit as st
 
 from theme import apply_theme
+from auth import require_login
 from cogs.github_writer import github_is_configured, push_paths
 from cogs.produce import reconcile_groups
 
@@ -44,6 +45,7 @@ AIR_RATES_CSV = "air_freight_rates.csv"
 GROUPS_CSV = "product_groups.csv"
 
 st.set_page_config(page_title="Catalogue — Ledger", layout="wide", page_icon="◐")
+require_login()
 
 apply_theme("catalogue")
 
@@ -130,7 +132,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 st.markdown(
-    "<h1 style='margin-top:4px'>Edit <em>everything</em>.</h1>",
+    "<h1 style='margin-top:4px'>Edit <span class='lx-em'>everything</span>.</h1>",
     unsafe_allow_html=True,
 )
 st.markdown(
@@ -188,6 +190,7 @@ with tabs[0]:
         merged,
         num_rows="dynamic",
         use_container_width=True,
+        height=560,
         hide_index=True,
         column_config={
             "ProductID": st.column_config.TextColumn("Product ID", required=True, width="large"),
@@ -531,6 +534,7 @@ with tabs[4]:
         air_df,
         num_rows="dynamic",
         use_container_width=True,
+        height=560,
         hide_index=True,
         column_config={
             "Destination": st.column_config.TextColumn("Destination", required=True),

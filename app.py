@@ -1,12 +1,14 @@
 import pandas as pd
 import streamlit as st
 import os
+import html
 from datetime import datetime
 import plotly.express as px
 import numpy as np
 import plotly.graph_objects as go
 
-from theme import apply_theme, plot_style
+from theme import apply_theme, plot_style, stat_cards, section_label, masthead
+from auth import require_login
 from cogs.exchange import (
     DISPLAY_CURRENCIES,
     CURRENCY_SYMBOLS,
@@ -43,6 +45,7 @@ exchange_rate = 1.0  # TRY rate no longer used; retained as a no-op multiplier
 # --- Streamlit Setup ---
 st.set_page_config(layout="wide", page_title="Ledger — Cost & Logistics", page_icon="◐")
 
+require_login()
 apply_theme("main")
 
 # --- Sidebar masthead ---
@@ -54,33 +57,27 @@ with st.sidebar:
     except Exception as e:
         st.error(f"An error occurred loading the logo: {e}")
     st.markdown(
-        "<div style='font-family:\"Space Grotesk\",sans-serif;font-weight:600;"
-        "font-size:1.05rem;color:var(--ink);letter-spacing:-0.02em;margin-top:8px;'>"
-        "Ledger<span style='color:var(--pink)'>.</span></div>"
+        "<div class='lx-brand' style='margin-top:8px;'>Ledger<span>.</span></div>"
         "<div style='font-family:\"JetBrains Mono\",monospace;font-size:0.62rem;color:var(--ink-muted);"
         "letter-spacing:0.2em;text-transform:uppercase;margin-bottom:18px;'>Cost · Logistics · Margin</div>",
         unsafe_allow_html=True,
     )
 
 # --- Masthead ---
-st.markdown(
-    "<h1 style='margin:6px 0 6px'>Cost &amp; <em>Logistics</em> Calculator</h1>"
-    "<p style='font-size:0.92rem;color:var(--ink-muted);max-width:62ch;"
-    "margin:0 0 24px;line-height:1.5;'>"
-    "Everything in USD. One FX conversion at the end.</p>",
-    unsafe_allow_html=True,
+masthead(
+    "Aksun · Cost · Logistics · Margin",
+    "Cost &amp; <span class='lx-em'>Logistics</span> Calculator",
+    "Everything in USD<br>One FX conversion at the end",
 )
 
 
+_SIDEBAR_SECTION_COUNT = [0]
+
+
 def _sidebar_section(label: str) -> None:
-    """Mono-uppercase mini-label with a soft divider above. Replaces st.subheader in the sidebar."""
-    st.sidebar.markdown(
-        "<div style='border-top:1px solid var(--rule);margin:14px 0 10px;'></div>"
-        f"<div style='font-family:ui-monospace,SFMono-Regular,Menlo,monospace;"
-        "font-size:0.68rem;letter-spacing:0.16em;text-transform:uppercase;"
-        f"color:var(--ink-muted);margin-bottom:6px;'>{label}</div>",
-        unsafe_allow_html=True,
-    )
+    """Numbered uppercase section label in the sidebar (01, 02, ...)."""
+    _SIDEBAR_SECTION_COUNT[0] += 1
+    section_label(label, f"{_SIDEBAR_SECTION_COUNT[0]:02d}", container=st.sidebar)
 
 # --- Initialize session state ---
 if 'calculation_done' not in st.session_state: st.session_state['calculation_done'] = False
@@ -88,34 +85,8 @@ if 'final_cost_per_box_usd' not in st.session_state: st.session_state['final_cos
 
 
 def _stat_row(items: list[tuple[str, str, str | None]]) -> None:
-    """Render N inline label/value cells as a compact stat row.
-
-    Each item is (label, value, hint). label = mono-uppercase top, value = bold
-    figure, hint = optional muted text under the value.
-    """
-    n = len(items) or 1
-    cells = []
-    for label, value, hint in items:
-        hint_html = (
-            f'<div style="font-size:0.75rem;color:var(--ink-muted);'
-            f'margin-top:2px;line-height:1.3;">{hint}</div>'
-            if hint else ""
-        )
-        cells.append(
-            '<div>'
-            '<div style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;'
-            'font-size:0.64rem;letter-spacing:0.16em;text-transform:uppercase;'
-            f'color:var(--ink-muted);margin-bottom:4px;">{label}</div>'
-            '<div style="font-family:Inter,sans-serif;font-feature-settings:\'tnum\';'
-            f'font-size:1.05rem;font-weight:600;color:var(--ink);line-height:1.2;">{value}</div>'
-            f'{hint_html}'
-            '</div>'
-        )
-    st.markdown(
-        f'<div style="display:grid;grid-template-columns:repeat({n},minmax(0,1fr));'
-        f'gap:18px;margin:6px 0 14px;">{"".join(cells)}</div>',
-        unsafe_allow_html=True,
-    )
+    """Render N label/value cells as a compact bento row of stat cards."""
+    stat_cards(items, small=True)
 
 
 # --- Display Currency (single FX at the end) ---
@@ -429,7 +400,7 @@ calculation_ready = (
 )
 
 if calculation_ready and (
-    st.sidebar.button("Calculate Costs")
+    st.sidebar.button("Calculate Costs", type="primary", use_container_width=True)
     or st.session_state.get('calculation_done', False)
 ):
 
@@ -564,7 +535,7 @@ if calculation_ready and (
         for err in calc_errors: st.error(f"- {err}")
         st.session_state['calculation_done'] = False # Ensure flag is false on error
     elif st.session_state.get('calculation_done', False): # Proceed only if calculation was successful
-        st.header(f"Calculation Results (in {display_currency})")
+        section_label(f"Results · {display_currency}", "▲")
 
         # Update top display line to include rebate % if applicable
         display_destination = f" | Dest: `{selected_destination}`" if selected_shipment_type == "Air" else ""
@@ -622,10 +593,10 @@ if calculation_ready and (
                 )
 
             # Top-line summary: batch totals + key per-box figure on each.
-            _stat_row([
+            stat_cards([
                 ("Total COGS", fmt(total_cogs_usd), f"per box {fmt(cogs_per_box_usd)}"),
                 ("Logistics", fmt(total_logistics_cost_usd), f"per box {fmt(logistics_per_box_usd)}"),
-                ("Delivered (incl. rebate)", fmt(final_total_cost_usd), f"per box {fmt(final_cost_per_box_usd)}"),
+                ("Delivered (incl. rebate)", fmt(final_total_cost_usd), f"per box {fmt(final_cost_per_box_usd)}", True),
             ])
 
             # COGS breakdown — per-batch totals with per-box figures inline.
@@ -681,12 +652,16 @@ if calculation_ready and (
                     f"{fmt(final_total_cost_usd)} / {fmt(final_cost_per_box_usd)}",
                     f"per kg net {fmt(final_cost_per_kg_net_usd)}" if total_net_weight_kg > 0 else None),
             ])
-            st.caption(
-                f"{fmt(total_cogs_usd)} (COGS) + "
-                f"{fmt(total_logistics_cost_usd)} (Logistics) + "
-                f"{fmt(total_unexpected_cost_usd)} (Unexpected) + "
-                f"{fmt(rebate_amount_usd)} (Rebate) = "
-                f"{fmt(final_total_cost_usd)}"
+            # Rendered as escaped HTML so "$" amounts are not parsed as LaTeX.
+            _fx = lambda v: html.escape(fmt(v))
+            st.markdown(
+                "<div class='lx-formula'>"
+                f"<b>{_fx(total_cogs_usd)}</b> COGS + "
+                f"<b>{_fx(total_logistics_cost_usd)}</b> Logistics + "
+                f"<b>{_fx(total_unexpected_cost_usd)}</b> Unexpected + "
+                f"<b>{_fx(rebate_amount_usd)}</b> Rebate = "
+                f"<b>{_fx(final_total_cost_usd)}</b></div>",
+                unsafe_allow_html=True,
             )
 
         # --- Detail tab (former Batch Summary Detail) ---
@@ -846,6 +821,25 @@ if calculation_ready and (
                      st.caption("*Variable Component Costs were excluded from COGS calculation based on checkbox selection.*")
             else: st.write("(No variable components found in recipe or breakdown unavailable)")
 
+else:
+    st.markdown(
+        "<div class='lx-hero'><div>"
+        "<div class='lx-big'>Price the <span class='lx-em'>whole</span> journey.</div>"
+        "<p>Raw fruit, packaging, pallets, fixed costs, freight and rebate — "
+        "landed cost per box in one pass, with a margin check and a cost matrix "
+        "for every air destination.</p></div><div>"
+        "<ul class='lx-steps'>"
+        "<li><b>01</b>Pick the reporting currency and FX source</li>"
+        "<li><b>02</b>Choose the product, quantity and pallets</li>"
+        "<li><b>03</b>Enter raw cost (TRY/kg) and fixed-cost mode</li>"
+        "<li><b>04</b>Set shipment type and destination</li>"
+        "<li><b>05</b>Add rebate and target profit, then press <b>Calculate Costs</b></li>"
+        "</ul></div></div>",
+        unsafe_allow_html=True,
+    )
+    if not calculation_ready:
+        st.caption("Complete the sidebar inputs to enable the Calculate button.")
+
 # --- Export Section ---
 st.markdown("---")
 st.subheader("📊 Export Results")
@@ -962,6 +956,7 @@ if st.session_state.get('calculation_done', False) and selected_shipment_type ==
         st.dataframe(
             display_matrix.style.format("${:,.2f}"),
             use_container_width=True,
+            height=min(38 + 35 * (len(display_matrix) + 2), 720),
         )
 
         with st.expander("Copy for email (tab-separated)", expanded=False):

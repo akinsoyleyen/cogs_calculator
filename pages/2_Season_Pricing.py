@@ -13,6 +13,7 @@ import pandas as pd
 import streamlit as st
 
 from theme import apply_theme
+from auth import require_login
 from cogs.exchange import FALLBACK_USD_RATES, get_usd_to_target_rate
 from cogs.data_loader import (
     AIR_RATES_CSV,
@@ -32,6 +33,7 @@ from cogs.airtable_writer import airtable_is_configured, build_ledger_rows, log_
 from cogs.github_writer import github_is_configured, push_paths
 
 st.set_page_config(page_title="Season Pricing — Ledger", layout="wide", page_icon="◐")
+require_login()
 apply_theme("season")
 
 
@@ -70,7 +72,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 st.markdown(
-    "<h1 style='margin-top:4px'>Price the whole <em>season</em> at once.</h1>",
+    "<h1 style='margin-top:4px'>Price the whole <span class='lx-em'>season</span> at once.</h1>",
     unsafe_allow_html=True,
 )
 st.markdown(
@@ -346,6 +348,7 @@ if res and not res["long"].empty:
         view.style.format({c: "${:,.2f}" for c in pallet_cols}),
         hide_index=True,
         use_container_width=True,
+        height=min(38 + 35 * (len(view) + 1), 720),
     )
 
     # Excel / TSV follow the filtered view; the inputs sheet lists only its fruits.
