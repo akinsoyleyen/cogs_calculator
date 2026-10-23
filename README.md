@@ -19,9 +19,45 @@ A devcontainer is provided (`.devcontainer/devcontainer.json`) — open the repo
 - **Catalogue** (`pages/1_Catalogue.py`) — inline editor for the CSV data files. Edit products (including each pack type's produce family and air-eligibility), components, weights, packing, recipes, fixed costs, pallets, and air-freight rates without leaving the browser.
 - **Season Pricing** (`pages/2_Season_Pricing.py`) — type one raw price per fruit; the app fans each priced fruit out across all its pack types and air destinations, builds the matrix for each, stacks the lot into one table, and logs it to the Airtable ledger in one click. See "Season pricing" below.
 
+## Login
+
+Every page is behind a login (`auth.py` → `require_login()`, called right after
+`st.set_page_config` on each page). Credentials come from Streamlit secrets; if
+the `[auth]` section is missing the app **fails closed** and shows setup
+instructions instead of the calculator.
+
+1. Create a password hash (PBKDF2-SHA256, stdlib only):
+
+   ```
+   python auth.py hash
+   ```
+
+2. Put it in `.streamlit/secrets.toml` on the server (this file is gitignored;
+   see `.streamlit/secrets.toml.example`):
+
+   ```toml
+   [auth]
+   username = "admin"
+   password_hash = "pbkdf2_sha256$600000$<salt_hex>$<hash_hex>"
+   ```
+
+3. Restart Streamlit. A **Log out** button sits at the top of the sidebar.
+
+On Streamlit Community Cloud paste the same block into *App settings → Secrets*.
+
 ## Theme
 
-`theme.py` exposes `apply_theme(page_name)` and `plot_style()`. Two themes ship: **Light** (default, SwingScope-inspired) and **Dark Neon**. Theme is selected via the sidebar on each page and persists across pages via `st.session_state`.
+`theme.py` exposes `apply_theme(page_name)`, `plot_style()` and small HTML
+helpers (`stat_cards`, `section_label`, `masthead`). Two futuristic themes ship:
+
+- **Dark** (default) — near-black, `#FF6A1A` orange accent with glow, Orbitron
+  display type, thin bordered cards and angled buttons.
+- **Light** — warm paper with a dot grain, black ink, 1px bento grid lines,
+  Syne / Space Grotesk display type and round buttons.
+
+Switch with the **Dark mode** toggle at the top of the sidebar; the choice
+persists across pages via `st.session_state`. The theme is purely visual — no
+calculation code depends on it.
 
 ## Data files
 
